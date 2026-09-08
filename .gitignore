@@ -1,0 +1,28 @@
+# ==== 敏感配置与登录态（绝不提交）====
+jxjy_mail_config.json
+jxjy_state.json
+*.bak
+
+# ==== 运行时数据 / 日志 ====
+jxjy_study.log
+jxjy_study_report.json
+jxjy_dashboard_data.json
+jxjy_courses.json
+jxjy_login_qr.png
+jxjy_fail_*.png
+
+# ==== 看板产物（含个人学分数据，默认不提交；如需分享脱敏模板再放开）====
+*.html
+
+# ==== Python ====
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ==== 系统 / 编辑器 ====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
