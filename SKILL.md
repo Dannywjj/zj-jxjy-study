@@ -6,8 +6,9 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.0.0
+version: 1.0.1
 author: Dannywjj
+agent_created: true
 ---
 
 # 浙江会计继续教育自动刷课运维
@@ -39,7 +40,7 @@ author: Dannywjj
 - `jxjy_study.log` —— 统一日志
 
 数据与看板：
-- `jxjy_dashboard_data.json` —— 学分汇总（总/专业/公需、今日学分、当前课程、学费）
+- `jxjy_dashboard_data.json` —— 学分汇总（总/专业/公需、今日学分、当前课程）
 - `jxjy_courses.json` —— 课程清单（已学完/学习中/即将学习）
 - `refresh_jxjy_after_session.py` —— 刷课结束后抓取最新学分面板
 - `jxjy_dashboard_updater.py` —— 根据数据 JSON 刷新本地看板

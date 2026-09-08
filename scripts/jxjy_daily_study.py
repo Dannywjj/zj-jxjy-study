@@ -428,7 +428,22 @@ def enter_course(study_page, ctx, skip=None):
     try:
         with ctx.expect_page(timeout=30000) as info:
             try:
-                link.click(timeout=10000)
+                # 提取链接 onclick 参数（如 isStudyThisCourse(courseId, classId, schoolId, type, ?)），
+                # 直接在页面作用域内调用，最稳（不依赖元素可见性 / CSS）
+                onclick_text = link.evaluate("el => el.getAttribute('onclick')")
+                if onclick_text and onclick_text.strip():
+                    fn_match = re.search(r"([A-Za-z_][\w]*)\s*\(([^)]*)\)", onclick_text)
+                    if fn_match:
+                        fn_name = fn_match.group(1)
+                        fn_args = fn_match.group(2)
+                        # 在页面作用域里直接调用
+                        study_page.evaluate(f"() => {{ if (typeof {fn_name} === 'function') {{ {fn_name}({fn_args}); }} }}")
+                        log(f"已通过 evaluate 触发: {fn_name}({fn_args[:60]})")
+                    else:
+                        # fallback：click force
+                        link.click(timeout=10000, force=True)
+                else:
+                    link.click(timeout=10000, force=True)
             except Exception as ce:
                 log(f"点击课程链接失败: {ce}")
                 return None, text
@@ -573,7 +588,9 @@ def main():
                 if not play_page:
                     if row_text:
                         # 该课程打不开，记入跳过名单并重试下一个
-                        key = row_text.split("\t")[0].strip()[:30]
+                        # 用前 8 字符的科目关键作为 key（而非整行截断），保证下次 find_current_course
+                        # 的 skip substring 匹配能稳定命中（row.inner_text() 含 tab 不会污染科目关键字）
+                        key = row_text.strip().split()[0][:8] if row_text.strip().split() else row_text[:8]
                         skipped_courses.append(key)
                         entry_fail += 1
                         log(f"课程 [{key}] 无法进入，已加入跳过名单")
