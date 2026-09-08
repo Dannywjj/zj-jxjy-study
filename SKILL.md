@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.0.1
+version: 1.1.0
 author: Dannywjj
 agent_created: true
 ---
@@ -146,6 +146,57 @@ cd "C:/Users/admin/WorkBuddy/<project>/.workbuddy"
 - **已学习学分** = `total.got`（如 24.26）
 - **待学习学分** = `total.need - total.got`（如 65.74）
 - **即将学习学分** = 下一门待学课程的学分
+
+## 配套自动化（每日中午刷新，可选）
+
+刷课任务（默认每天 9:00 启动、跑 15 小时）只在结束时刷新一次看板。但白天用户想"看一眼当前学分"，就要等到 0:00 之后——这不友好。
+
+**解决：建一个独立的"中午刷新" automation 任务**，每天 12:00 自动跑一次，只抓数据不刷课（~30 秒完成），与刷课任务并行无干扰。
+
+### 为什么必须独立任务（不能合并到刷课任务）
+
+- 9:00 刷课任务是单一连续进程（900 分钟不中断）
+- 在它内部塞"12:00 暂停刷课→刷新→继续"会破坏视频连续性，跳课风险高
+- 独立任务 12:00 跑 ~30 秒就退出，刷课进程无感知
+
+### 一键创建命令（用 WorkBuddy 工具）
+
+让智能体执行以下 prompt：
+
+```
+请帮我在当前 WorkBuddy 里创建一个定时自动化任务，参数如下：
+- 任务名：浙江会计继续教育看板每日中午刷新
+- 状态：ACTIVE
+- 频率：FREQ=DAILY;BYHOUR=12;BYMINUTE=0
+- 工作目录：C:\Users\admin\WorkBuddy\<当前项目目录>\.workbuddy
+- 任务 prompt：
+
+  运行浙江会计继续教育看板中午刷新：
+  1. 使用 Python 解释器 C:\Users\admin\.workbuddy\binaries\python\envs\default\Scripts\python.exe
+  2. 工作目录切换到工作目录参数指定的位置
+  3. 执行命令：python refresh_jxjy_after_session.py
+     - 该脚本会用 jxjy_state.json 的登录态打开学习中心 → 抓取最新学分 → 写入 jxjy_dashboard_data.json
+  4. 然后执行：python jxjy_dashboard_updater.py
+     - 该脚本根据 jxjy_dashboard_data.json 刷新 继续教育看板.html 和 综合看板.html
+  5. 读取 jxjy_dashboard_data.json，向用户汇报当前总学分 / 专业课 / 公需课、今日学分、正在学课程
+  6. 如果 jxjy_state.json 已过期导致抓数据失败，输出提醒"登录态过期，下次 9:00 刷课任务会自动重建"即可，不强制重建登录态（避免重复扫码打扰用户）。
+```
+
+创建后可用 `automation_update id=<新任务id> mode=view` 校验。
+
+### 关闭 / 删除
+
+- **暂停**：`automation_update id=<id> status=PAUSED`，12:00 不再触发但任务保留
+- **永久删除**：`automation_update id=<id> mode=delete`
+- **修改时间**：`automation_update id=<id> mode=update rrule=FREQ=DAILY;BYHOUR=18;BYMINUTE=0`（改成 18:00 傍晚刷新）
+
+### 用户原话触发
+
+用户说以下任一表述时，按本节流程创建或更新任务：
+- "继续教育每天 12 点自动刷新一下" → 按上述默认参数创建
+- "继续教育改成下午 6 点刷新" → mode=update 改 rrule
+- "中午刷新暂停" → status=PAUSED
+- "中午刷新停了" / "删掉中午刷新" → mode=delete
 
 ## 依赖环境
 
