@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.1.0
+version: 1.2.0
 author: Dannywjj
 agent_created: true
 ---
@@ -114,6 +114,71 @@ cd "C:/Users/admin/WorkBuddy/<project>/.workbuddy"
 1. 智能体启动自动化任务时，先看 `jxjy_state.json` 是否过期（cookie 数通常 ≥40）。
 2. 若被踢到登录页（任务报 status=error），走"远程扫码登录"或"人工登录"流程重新生成登录态。
 3. 登录后任务从第一门未完成课程开始；已学完的会被 `is_course_row_completed()` 自动跳过，不会傻乎乎重播。
+
+## 按需自动关机（用户口令启用）
+
+**默认不启用**——避免误关机风险。仅在用户当天**明确要求**时，才给 9:00 任务的 prompt 加上一段"刷完关机"逻辑，且**只在深夜 23:00 后**执行，避开白天误关机。
+
+### 设计原则
+
+- **不写死在 `jxjy_daily_study.py` 里**：保持脚本纯净，关机是上层调度决策
+- **不修改刷课主脚本**：避免误触发后无法调试
+- **不默认开启**：必须用户口令才会改 automation 任务的 prompt
+- **深夜时间窗**：≥23:00 且 < 次日 08:00，避免白天误关机
+
+### 用户原话触发（agent 自动处理）
+
+| 用户原话 | agent 动作 |
+|---|---|
+| "今晚刷完关机" / "晚上刷完自动关机" | 给 9:00 任务 prompt 末尾追加 1 段（见下），次日 9:00 自动失效 |
+| "今晚不关机" / "今晚取消关机" | 从 9:00 任务 prompt 末尾移除该段 |
+| "以后每天都关机" / "默认刷完关机" | **拒绝**：明确告知"默认每天关机有误操作风险，请每次说一次"，引导用户每次单独口令 |
+| "立刻关机" / "现在关机" | 立即执行 `shutdown /s /t 60`（不等任务结束） |
+| "取消关机" / "别关机了" | 立即执行 `shutdown /a`（取消进行中的关机倒计时） |
+
+### 追加到 9:00 任务 prompt 的内容（启用时）
+
+```
+7.【当日特殊 · 仅用户口令启用】任务报告 "学习完成" 后：
+   - 若当前本地时间在 23:00 ~ 次日 08:00 之间：执行 `shutdown /s /t 60`（60 秒缓冲，用户可手动 `shutdown /a` 取消）
+   - 若当前时间 < 23:00：不执行任何关机动作（避免白天被误关）
+   - 若 jxjy_state.json 已失效导致学分未涨：跳过关机（用户应被提醒而非被关机）
+```
+
+agent 调用方式：
+
+```python
+# 启用今晚关机
+automation_update(
+    id="260afb90-3106-4a73-aead-538a39a1fe0a",  # 9:00 刷课任务 ID
+    mode="update",
+    prompt="<原 prompt>\n\n" + "<上述第 7 段>"
+)
+
+# 关闭今晚关机
+automation_update(
+    id="260afb90-3106-4a73-aead-538a39a1fe0a",
+    mode="update",
+    prompt="<原 prompt>"  # 不含第 7 段
+)
+```
+
+### 安全兜底
+
+- **60 秒缓冲**：`/t 60` 让用户有 1 分钟按 `shutdown /a` 取消
+- **时间窗口限制**：白天（08:00~23:00）永不关机
+- **失败兜底**：登录失效 / 学分未涨时跳过关机，避免"没刷到还被关机"
+- **次日自动失效**：下次 9:00 任务启动时，agent 应重新检查口令是否仍有效（一般口令都是当日有效）
+
+### 与跨夜任务的协同
+
+| 场景 | 策略 |
+|---|---|
+| 9:00 启动 → 23:00 完成 + 用户口令 | 自动关机 |
+| 9:00 启动 → 16:00 完成 + 用户口令 | **不关机**（时间未到 23:00） |
+| 9:00 启动 → 23:00 完成 + 用户没口令 | 不关机 |
+| 9:00 启动 → 23:30 仍未完成（卡课） | 不关机（学分未涨兜底触发） |
+| 临时任务（用户口头说"今晚手动刷到 22:00"） | 由 agent 在临时任务里单独处理 |
 
 ## 常见故障与处理
 
