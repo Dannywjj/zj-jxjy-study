@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.2.0
+version: 1.3.0
 author: Dannywjj
 agent_created: true
 ---
@@ -132,9 +132,45 @@ cd "C:/Users/admin/WorkBuddy/<project>/.workbuddy"
 |---|---|
 | "今晚刷完关机" / "晚上刷完自动关机" | 给 9:00 任务 prompt 末尾追加 1 段（见下），次日 9:00 自动失效 |
 | "今晚不关机" / "今晚取消关机" | 从 9:00 任务 prompt 末尾移除该段 |
+| "**继续教育学习完毕后关机**" / "**最迟次日 N 点关机**" | **启动独立看门狗脚本** `jxjy_auto_shutdown.py`（30 秒轮询），两个条件满足任一即触发：`shutdown /s /t 60`：
+  - 刷课任务报告 status ∈ {completed, all_courses_done} → 立即关机
+  - 当前时间 ≥ 用户指定的最迟时间（默认次日 03:00）→ 强制关机 |
 | "以后每天都关机" / "默认刷完关机" | **拒绝**：明确告知"默认每天关机有误操作风险，请每次说一次"，引导用户每次单独口令 |
 | "立刻关机" / "现在关机" | 立即执行 `shutdown /s /t 60`（不等任务结束） |
 | "取消关机" / "别关机了" | 立即执行 `shutdown /a`（取消进行中的关机倒计时） |
+
+### 「学习完毕 + 最迟时间」关机方案（推荐用于跨夜任务）
+
+适用于用户口头给出"刷完关机"+"最迟 X 点"组合指令（如本会话 2026-09-09 "继续教育学习完毕后关机，最迟次日3点"）。
+
+**优势 vs 9:00 任务 prompt 嵌入**：
+- ✅ 不依赖 automation 任务执行（agent 不可用时仍生效）
+- ✅ 支持任意最迟时间，不限于 23:00 后
+- ✅ 看门狗和刷课进程相互独立，一个挂了不影响另一个
+- ✅ 看门狗脚本本身可重复使用（用户再次说同样指令时，agent 直接 `python jxjy_auto_shutdown.py` 即可）
+
+**脚本位置**：`~/.workbuddy/jxjy_auto_shutdown.py`（脱敏版在 `scripts/`）
+
+**启动命令**：
+```bash
+cd ~/.workbuddy && python jxjy_auto_shutdown.py
+```
+
+**判定逻辑**：
+- 每 30 秒检查一次
+- 触发条件 ①：`jxjy_study_report.json` 状态 ∈ {completed, all_courses_done} → 立即关机
+- 触发条件 ②：当前时间 ≥ 启动后次日 03:00（或用户指定时间）→ 强制关机
+- 关机命令：`shutdown /s /t 60` + 提示文案（用户可 60 秒内执行 `shutdown /a` 取消）
+
+**日志位置**：`jxjy_shutdown.log`（可随时查看看门狗状态）
+
+**关闭看门狗**：
+```bash
+# 方法 1：用户/agent 直接 Ctrl+C 中断前台进程
+# 方法 2：agent 通过 taskkill
+taskkill /F /IM python.exe /FI "WINDOWTITLE eq jxjy_auto_shutdown*"
+# 方法 3：用户重启电脑
+```
 
 ### 追加到 9:00 任务 prompt 的内容（启用时）
 
@@ -204,8 +240,11 @@ automation_update(
 
 刷课结束或用户查看时，同步看板数据：
 1. `refresh_jxjy_after_session.py` 抓最新学分面板 → 更新 `jxjy_dashboard_data.json`。
-2. `jxjy_dashboard_updater.py` 据 JSON 刷新 `继续教育看板.html` 与 `综合看板.html`。
-3. 课程清单手动/脚本维护在 `jxjy_courses.json`。
+2. `jxjy_dashboard_updater.py` 据 JSON 刷新 `.workbuddy/jxjy_dashboard.html` + 根目录 `综合看板.html`。
+3. `jxjy_kanban_updater.py` 据 JSON 刷新根目录 `继续教育看板.html`（与 dashboard_updater 互补，确保三个看板全同步）。
+4. 课程清单手动/脚本维护在 `jxjy_courses.json`。
+
+> **重要**：12:00 中午刷新任务必须**同时跑两个 updater**，否则根目录的 `继续教育看板.html` 会停留在刷课结束时的旧版。
 
 看板核心指标口径：
 - **已学习学分** = `total.got`（如 24.26）
@@ -241,8 +280,9 @@ automation_update(
   2. 工作目录切换到工作目录参数指定的位置
   3. 执行命令：python refresh_jxjy_after_session.py
      - 该脚本会用 jxjy_state.json 的登录态打开学习中心 → 抓取最新学分 → 写入 jxjy_dashboard_data.json
-  4. 然后执行：python jxjy_dashboard_updater.py
-     - 该脚本根据 jxjy_dashboard_data.json 刷新 继续教育看板.html 和 综合看板.html
+  4. 然后**同时跑两个 updater**确保三个看板全部同步：
+     - python jxjy_dashboard_updater.py（刷新 .workbuddy/jxjy_dashboard.html 和根目录 综合看板.html）
+     - python jxjy_kanban_updater.py（刷新根目录 继续教育看板.html）
   5. 读取 jxjy_dashboard_data.json，向用户汇报当前总学分 / 专业课 / 公需课、今日学分、正在学课程
   6. 如果 jxjy_state.json 已过期导致抓数据失败，输出提醒"登录态过期，下次 9:00 刷课任务会自动重建"即可，不强制重建登录态（避免重复扫码打扰用户）。
 ```
