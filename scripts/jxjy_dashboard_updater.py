@@ -145,10 +145,17 @@ def update_zonghe_dashboard(data):
         html
     )
 
-    # 底部 auto-card meta
+    # 底部 auto-card meta（小时数用 \d+ 兼容后续调整；实际为 840 分钟 = 14 小时）
     html = re_sub(
-        r'<div class="auto-meta">每日 09:00 启动 · 8 小时 · .*?</div>',
-        f'<div class="auto-meta">每日 09:00 启动 · 8 小时 · 已获得 {total["got"]}/{int(total["need"])} · 待学 {remain:.2f}</div>',
+        r'<div class="auto-meta">每日 09:00 启动 · \d+ 小时 · 已获得 .*?</div>',
+        f'<div class="auto-meta">每日 09:00 启动 · 14 小时 · 已获得 {total["got"]}/{int(total["need"])} · 待学 {remain:.2f}</div>',
+        html
+    )
+
+    # 「三大工作模块」继续教育卡片的 module-desc（此前遗漏未同步，属残留旧值）
+    html = re_sub(
+        r'<div class="module-desc">每日 09:00 自动挂课 [^<]*</div>',
+        f'<div class="module-desc">每日 09:00 自动挂课 14 小时 · 已获 {total["got"]}/{int(total["need"])} 学分 · 待学 {remain:.2f} · 今日 +{today:.2f}</div>',
         html
     )
 

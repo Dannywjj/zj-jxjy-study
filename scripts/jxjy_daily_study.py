@@ -13,7 +13,7 @@
 用法：
   python jxjy_daily_study.py [分钟数]   # 默认运行 60 分钟
 """
-import os, sys, json, time, datetime, traceback, re, subprocess
+import os, sys, json, time, datetime, traceback, re, subprocess, atexit
 from playwright.sync_api import sync_playwright
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -22,8 +22,17 @@ REPORT_FILE = os.path.join(BASE, "jxjy_study_report.json")
 LOG_FILE = os.path.join(BASE, "jxjy_study.log")
 DASH_DATA_FILE = os.path.join(BASE, "jxjy_dashboard_data.json")
 UPDATER_FILE = os.path.join(BASE, "jxjy_dashboard_updater.py")
+# 公需课学习计划（有序课程名单）。专业课达标后按此名单刷公需课。
+PLAN_FILE = os.path.join(BASE, "jxjy_pubcourse_plan.json")
+
+# 单实例锁：防止同一账号被两个会话同时登录而互踢
+# （典型场景：跨天长会话仍在跑时，每日 09:00 自动任务又起一个新会话）
+LOCK_FILE = os.path.join(BASE, "jxjy_study.lock")
 
 DEFAULT_MINUTES = 480
+
+# 最近一次抓到的学分总览（专业课未达标前用于判断是否切公需课）
+LATEST_OVERVIEW = None
 
 # 刷完自动关机功能已停用（默认不会关闭计算机）。
 # 如需临时关机，请在操作系统层面单独执行 shutdown 命令。
@@ -46,7 +55,28 @@ def save_report(data):
 
 
 def fetch_credit_overview(page):
-    """从学习中心页面抓取 2026 年度学分总览。"""
+    """从学习中心页面抓取 2026 年度学分总览。
+
+    优先用「学分进度」文本精确解析（唯一、无歧义）：
+      学习总学分进度： 51.6/90  专业课学分进度： 51.6/60  公需课学分进度： 0/18
+    失败时回落到旧版表格行扫描。
+    """
+    # 方案 A：学分进度文本
+    try:
+        body = page.evaluate("() => document.body.innerText").replace("\n", " ")
+        mt = re.search(r"总学分进度[：:]\s*([\d.]+)\s*/\s*([\d.]+)", body)
+        mm = re.search(r"专业课学分进度[：:]\s*([\d.]+)\s*/\s*([\d.]+)", body)
+        mp = re.search(r"公需课学分进度[：:]\s*([\d.]+)\s*/\s*([\d.]+)", body)
+        if mt and mm and mp:
+            return {
+                "year": 2026,
+                "total_got": float(mt.group(1)),
+                "major_got": float(mm.group(1)),
+                "public_got": float(mp.group(1)),
+            }
+    except Exception:
+        pass
+    # 方案 B（兜底）：表格行扫描（原逻辑）
     try:
         page.wait_for_selector("table tr", timeout=15000)
         rows = page.locator("table tr").all()
@@ -68,6 +98,135 @@ def fetch_credit_overview(page):
                 }
     except Exception as e:
         log(f"抓取学分总览失败: {e}")
+    return None
+
+
+def load_pubcourse_plan():
+    """读取公需课学习计划的有序课程名单。返回 list[str]。"""
+    if not os.path.exists(PLAN_FILE):
+        return []
+    try:
+        with open(PLAN_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        names = []
+        for c in d.get("courses", []):
+            if isinstance(c, dict) and c.get("name"):
+                names.append(c["name"])
+            elif isinstance(c, str) and c:
+                names.append(c)
+        return names
+    except Exception as e:
+        log(f"读取公需课计划失败: {e}")
+        return []
+
+
+def current_credit_state(study_page=None):
+    """返回 (专业课已得, 公需课已得)。优先实时抓取，失败回落到缓存 / 看板 JSON。"""
+    global LATEST_OVERVIEW
+    if study_page is not None:
+        try:
+            ov = fetch_credit_overview(study_page)
+            if ov:
+                LATEST_OVERVIEW = ov
+                try:
+                    save_dashboard_data(ov)
+                except Exception:
+                    pass
+                return ov["major_got"], ov["public_got"]
+        except Exception as e:
+            log(f"实时抓学分失败，改用缓存: {e}")
+    if LATEST_OVERVIEW:
+        return LATEST_OVERVIEW["major_got"], LATEST_OVERVIEW["public_got"]
+    try:
+        with open(DASH_DATA_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d.get("major", {}).get("got", 0.0), d.get("public", {}).get("got", 0.0)
+    except Exception:
+        return 0.0, 0.0
+
+
+def should_do_public(study_page=None):
+    """判断本次是否该刷公需课：专业课已达标(>=60) 且 公需课未达标(<18)。
+
+    刚跑完一门课时学分入账可能滞后，用 wait_fresh 参数让调用方传「刚结束的旧专业课学分」，
+    这里会等待学分刷新，避免把刚刷完的专业课又当成未达标而重复选专业课。
+    """
+    major_need = CREDIT_REQUIREMENT["major"]
+    pub_need = CREDIT_REQUIREMENT["public"]
+    major_got, public_got = current_credit_state(study_page)
+    if public_got >= pub_need - 0.01:
+        log(f"学分判定: 专业{major_got}/{major_need} 公需{public_got}/{pub_need} -> 公需课已达标，常规模式")
+        return False
+    decided = major_got >= major_need - 0.01
+    log(f"学分判定: 专业{major_got}/{major_need} 公需{public_got}/{pub_need} -> {'公需课模式' if decided else '常规专业课模式'}")
+    return decided
+
+
+def credits_done():
+    """年度学分是否已全部达标（总 ≥90）。
+
+    用于「刷完即关机」的完成态判定：达标后报告 status 置为 all_courses_done，
+    自动关机看门狗（jxjy_auto_shutdown.py --on-all-done）据此立即关机。
+    注意：原先脚本只输出 time_up / done_no_more_courses，
+    看门狗认的 all_courses_done 永远不会出现 →「刷完再关机」形同虚设。
+    """
+    total_got = None
+    if LATEST_OVERVIEW:
+        total_got = LATEST_OVERVIEW.get("total_got")
+    if total_got is None:
+        d = load_dashboard_data()
+        total_got = d.get("total", {}).get("got", 0.0)
+    try:
+        total_got = float(total_got or 0.0)
+    except (TypeError, ValueError):
+        total_got = 0.0
+    need = CREDIT_REQUIREMENT["total"]
+    return total_got >= need - 0.01, f"总学分 {total_got}/{need}"
+
+
+def search_course_row(study_page, name, tries=3):
+    """在学习中心用课程搜索框按名称精确定位课程行。返回 row locator 或 None。
+
+    实测：输入框为 #courseSearch0，需点 a.searchBth 触发（合成事件无效）。
+    """
+    box = study_page.locator("#courseSearch0").first
+    for attempt in range(tries):
+        try:
+            box.scroll_into_view_if_needed(timeout=5000)
+            box.click(timeout=5000)
+            box.fill("")
+            box.type(name, delay=25)
+        except Exception as e:
+            log(f"输入搜索词失败({name}): {e}")
+            study_page.wait_for_timeout(2000)
+            continue
+        clicked = False
+        for sel in ("a.searchBth", ".searchBth", "i.searchBth", "a.fr.searchBth"):
+            try:
+                study_page.locator(sel).first.click(timeout=4000)
+                clicked = True
+                break
+            except Exception:
+                continue
+        if not clicked:
+            try:
+                box.press("Enter")
+            except Exception:
+                pass
+        study_page.wait_for_timeout(4000)
+        try:
+            rows = study_page.locator("table tr")
+            for i in range(rows.count()):
+                row = rows.nth(i)
+                try:
+                    text = row.inner_text().replace("\n", " ")
+                except Exception:
+                    continue
+                if text and name in text:
+                    return row
+        except Exception as e:
+            log(f"搜索后读取表格失败: {e}")
+        log(f"第 {attempt + 1} 次未搜到课程[{name}]，重试…")
     return None
 
 
@@ -93,10 +252,19 @@ def save_dashboard_data(overview, current_course=None, current_section=None, tod
         major_got = overview.get("major_got", 0.0) if overview else old.get("major", {}).get("got", 0.0)
         pub_got = overview.get("public_got", 0.0) if overview else old.get("public", {}).get("got", 0.0)
 
-        # 今日已获取学分：用上次记录值与当前值的差额（首次运行则为 0）
-        last_total = old.get("total", {}).get("got", total_got)
-        today_got = round(total_got - last_total, 2)
+        # 今日已获取学分：以「当天起点学分」day_base 为基线。
+        # 原逻辑用「上次文件里的总分」当基线，导致同一轮里第二次保存就算出 0
+        # （因为刷课过程中会多次以 overview=None 调用本函数，total_got 取自旧文件）。
+        today_key = datetime.date.today().isoformat()
+        if old.get("day_key") == today_key and isinstance(old.get("day_base"), (int, float)):
+            day_base = old["day_base"]
+        else:
+            # 跨天（或旧文件缺基线）：以上一次记录的总学分作为今日起点
+            day_base = old.get("total", {}).get("got", total_got)
+        today_got = round(total_got - day_base, 2)
         if today_got < 0:
+            # 基线异常（取到了更大的旧值）→ 归零并以当前值为新基线
+            day_base = total_got
             today_got = 0.0
 
         data = {
@@ -107,11 +275,13 @@ def save_dashboard_data(overview, current_course=None, current_section=None, tod
             "major": {"got": major_got, "need": major_need},
             "public": {"got": pub_got, "need": pub_need},
             "today_got": today_got,
-            "today_got_note": "较上次记录增加",
+            "today_got_note": f"较今日起点（{day_base:.2f}）增加",
+            "day_key": today_key,
+            "day_base": day_base,
             "today_minutes": today_minutes or old.get("today_minutes", 0),
             "current_course": current_course or old.get("current_course", ""),
             "current_section": current_section or old.get("current_section", ""),
-            "schedule": old.get("schedule", "每日 09:00 · 8 小时"),
+            "schedule": old.get("schedule", "每日 09:00 · 14 小时"),
             "source": old.get("source", "学习中心页面 + 刷课日志"),
         }
         with open(DASH_DATA_FILE, "w", encoding="utf-8") as f:
@@ -366,10 +536,12 @@ def is_course_row_completed(row_text):
     return False, ""
 
 
-def find_current_course(study_page, skip=None):
+def find_current_course(study_page, skip=None, prefer_public=False, plan=None):
     """在学习中心选择要播放的课程行。
 
     选择优先级：
+    0. prefer_public=True（专业课已达标、公需课未达标）→ 按公需课计划名单逐门搜索定位；
+       名单全部完成/找不到时，退化为「公需知识」分类下顺序选课。
     1. 「继续学习」按钮 + 未完成 → in-progress，最优先（避免重启后切到新课）
     2. 「开始学习」按钮 + 未完成 → 新课，回退选项
     3. 已完成 / 在 skip 列表里的行一律跳过
@@ -378,6 +550,52 @@ def find_current_course(study_page, skip=None):
     因此这里带重试等待，避免过早判定"没有课程"。
     skip: list[str]，包含任意关键字的行将被跳过（用于跳过打不开的课程）。
     """
+    # ---- 公需课模式：按计划名单精确定位 ----
+    if prefer_public:
+        for name in (plan or []):
+            try:
+                row = search_course_row(study_page, name)
+            except Exception as e:
+                log(f"搜索公需课[{name}]异常: {e}")
+                row = None
+            if row is None:
+                log(f"公需课计划[{name}] 未在学习中心搜到，跳过该门")
+                continue
+            try:
+                text = row.inner_text().replace("\n", " ")
+            except Exception:
+                text = ""
+            completed, reason = is_course_row_completed(text)
+            if completed:
+                log(f"公需课[{name}] 已完成({reason})，看下一门")
+                continue
+            if skip and any(s in text for s in skip):
+                log(f"公需课[{name}] 在跳过名单内，看下一门")
+                continue
+            return row
+        # 计划全部完成或都搜不到 → 退化：切到「公需知识」分类顺序选课
+        log("公需课计划已全部完成/未搜到，退化为「公需知识」分类顺序学习")
+        try:
+            # 先清空搜索框，避免残留关键字干扰分类列表
+            try:
+                sb = study_page.locator("#courseSearch0").first
+                sb.fill("")
+                for sel in ("a.searchBth", ".searchBth"):
+                    try:
+                        study_page.locator(sel).first.click(timeout=3000)
+                        break
+                    except Exception:
+                        continue
+                study_page.wait_for_timeout(3000)
+            except Exception:
+                pass
+            tab = study_page.locator(".pc_cwaretype", has_text="公需知识").first
+            tab.scroll_into_view_if_needed(timeout=5000)
+            tab.click(timeout=8000)
+            study_page.wait_for_timeout(5000)
+        except Exception as e:
+            log(f"切换「公需知识」分类失败: {e}")
+
     def _pick(button_keyword, label):
         for _ in range(8):
             rows = study_page.locator("table tr")
@@ -406,12 +624,12 @@ def find_current_course(study_page, skip=None):
     return _pick("开始学习", "new")
 
 
-def enter_course(study_page, ctx, skip=None):
+def enter_course(study_page, ctx, skip=None, prefer_public=False, plan=None):
     """从学习中心点击课程行的继续学习/开始学习，返回 (播放页, 课程行文本)。
 
     兼容三种打开方式：新标签页 / 学习中心本页跳转 / 复用已有标签页。
     """
-    row = find_current_course(study_page, skip=skip)
+    row = find_current_course(study_page, skip=skip, prefer_public=prefer_public, plan=plan)
     if not row:
         return None, None
     text = row.inner_text().replace("\n", " ")
@@ -541,6 +759,51 @@ def start_video(play_page):
     return play_page
 
 
+def _pid_alive(pid):
+    """Windows 下判断进程是否存活"""
+    try:
+        # tasklist 在中文 Windows 输出 GBK；errors="replace" 避免解码异常，
+        # PID 为纯数字 ASCII，不受影响
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=10
+        ).stdout
+        return str(pid) in out
+    except Exception:
+        return False
+
+
+def acquire_single_instance():
+    """获取单实例锁。已有存活实例则返回 (False, 占用者PID)。"""
+    try:
+        if os.path.exists(LOCK_FILE):
+            old = 0
+            try:
+                old = int(open(LOCK_FILE, encoding="utf-8").read().strip() or 0)
+            except (ValueError, OSError):
+                old = 0
+            if old and old != os.getpid() and _pid_alive(old):
+                return False, old
+        with open(LOCK_FILE, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        return True, os.getpid()
+    except OSError as e:
+        log(f"单实例锁异常（忽略，继续运行）: {e}")
+        return True, os.getpid()
+
+
+def release_single_instance():
+    """仅当锁是本进程写的才删除，避免误删他人锁。"""
+    try:
+        if os.path.exists(LOCK_FILE):
+            cur = open(LOCK_FILE, encoding="utf-8").read().strip()
+            if cur == str(os.getpid()):
+                os.remove(LOCK_FILE)
+    except OSError:
+        pass
+
+
 def main():
     minutes = DEFAULT_MINUTES
     if len(sys.argv) > 1:
@@ -550,8 +813,17 @@ def main():
             pass
     log(f"=== 浙江会计继续教育每日刷课启动，目标运行 {minutes} 分钟 ===")
 
+    # 单实例防护：已有存活实例在跑则直接退出，避免同账号互踢
+    ok, holder = acquire_single_instance()
+    if not ok:
+        log(f"检测到已有刷课实例在运行（PID {holder}），本次跳过，避免同账号多会话互踢")
+        sys.exit(0)
+    atexit.register(release_single_instance)
+    log(f"单实例锁已获取（PID {os.getpid()}）")
+
     if not os.path.exists(STATE_FILE):
         log("错误：未找到登录态文件 jxjy_state.json，请先运行 jxjy_login_window.py 登录")
+        release_single_instance()
         sys.exit(1)
 
     end_time = time.time() + minutes * 60
@@ -570,6 +842,7 @@ def main():
             study_page = open_learning_center(ctx)
             skipped_courses = []   # 打不开的课程，跳过避免死循环
             entry_fail = 0         # 连续进入课程失败计数
+            course_finished = False  # 上一轮刚跑完一门课（用于等学分入账）
 
             while time.time() < end_time:
                 # 学习中心本页被跳转走时（同页进入课程），重新打开学习中心
@@ -579,8 +852,37 @@ def main():
                 except Exception:
                     study_page = open_learning_center(ctx)
 
+                # 刚跑完一门课时，学分入账可能滞后 —— 等它刷新，避免误判模式
+                if course_finished:
+                    course_finished = False
+                    for _ in range(4):
+                        major_got, public_got = current_credit_state(study_page)
+                        if major_got >= CREDIT_REQUIREMENT["major"] - 0.01 or public_got >= CREDIT_REQUIREMENT["public"] - 0.01:
+                            break
+                        log(f"学分尚未入账(专业{major_got}/公需{public_got})，等 20 秒后复查…")
+                        time.sleep(20)
+
                 try:
-                    play_page, row_text = enter_course(study_page, ctx, skip=skipped_courses)
+                    prefer_public = should_do_public(study_page)
+                except Exception as e:
+                    log(f"模式判定异常，按常规专业课模式继续: {e}")
+                    prefer_public = False
+
+                # 学分一旦全部达标（总≥90）→ 标记完成并结束，交看门狗/自动化按"刷完即关机"处理
+                try:
+                    met, credit_desc = credits_done()
+                    if met:
+                        log(f"学分已全部达标（{credit_desc}），今日任务完成")
+                        report["status"] = "all_courses_done"
+                        break
+                except Exception as e:
+                    log(f"学分达标判定异常: {e}")
+
+                plan = load_pubcourse_plan() if prefer_public else []
+
+                try:
+                    play_page, row_text = enter_course(study_page, ctx, skip=skipped_courses,
+                                                       prefer_public=prefer_public, plan=plan)
                 except Exception as e:
                     log(f"进入课程异常: {e}")
                     play_page, row_text = None, None
@@ -682,6 +984,7 @@ def main():
                                 continue
                             # 否则刷新学习中心，看是否有新课程
                             log("准备进入下一课程")
+                            course_finished = True   # 标记刚跑完一门课，下轮先等学分入账
                             try:
                                 if "learningCenter" in study_page.url:
                                     study_page.reload(wait_until="domcontentloaded", timeout=30000)

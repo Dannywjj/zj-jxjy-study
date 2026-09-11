@@ -9,6 +9,8 @@
   python jxjy_remote_login.py          # 完整模式：循环截图+刷新二维码+等登录
   python jxjy_remote_login.py --demo   # 演示模式：只截一次二维码就退出（验证用）
   python jxjy_remote_login.py --wait N # 最多等 N 分钟（默认 10）
+  python jxjy_remote_login.py --headless          # 无头模式（锁屏/无人值守时用）
+  python jxjy_remote_login.py --demo --headless    # 无头+演示：仅验证能否截到二维码
 
 配合 WorkBuddy 手机 App 的使用流程（见脚本末尾说明）。
 """
@@ -31,6 +33,12 @@ QR_META = os.path.join(BASE, "jxjy_login_qr.meta.txt")  # 每次截图写一行�
 JXJY_HOME = "https://jxjy.czt.zj.gov.cn/front/golearncenterNew.html"
 
 DEMO = "--demo" in sys.argv
+# 无头模式：锁屏 / 无人值守时用（headed 窗口在锁屏会话上可能渲染失败）
+HEADLESS = "--headless" in sys.argv
+# 邮件推送去重：同一张二维码 2 分钟内不重复推送，避免 45 秒一次的刷新轰炸邮箱
+MAIL_MIN_INTERVAL = 120
+LAST_QR_HASH = None
+LAST_MAIL_TS = 0.0
 MAX_WAIT = 10 * 60
 for _i, _a in enumerate(sys.argv):
     if _a == "--wait" and _i + 1 < len(sys.argv):
@@ -146,6 +154,7 @@ def find_qr_canvas(page):
 
 def save_qr(page):
     """截取二维码保存到 QR_FILE，返回是否成功。"""
+    global LAST_QR_HASH, LAST_MAIL_TS
     canvas = find_qr_canvas(page)
     if canvas is None:
         return False
@@ -155,8 +164,19 @@ def save_qr(page):
             f.write("%s\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
         log("二维码已保存 -> %s" % QR_FILE)
         if not DEMO:
-            ok, desc = send_qr_email(QR_FILE)
-            log("邮件推送：%s" % desc)
+            import hashlib
+            try:
+                with open(QR_FILE, "rb") as f:
+                    h = hashlib.md5(f.read()).hexdigest()
+            except Exception:
+                h = None
+            now_ts = time.time()
+            if h is not None and h == LAST_QR_HASH and now_ts - LAST_MAIL_TS < MAIL_MIN_INTERVAL:
+                log("二维码内容未变化，跳过重复邮件推送")
+            else:
+                ok, desc = send_qr_email(QR_FILE)
+                LAST_QR_HASH, LAST_MAIL_TS = h, now_ts
+                log("邮件推送：%s" % desc)
         return True
     except Exception as e:
         log("截图失败: %s" % e)
@@ -197,7 +217,7 @@ def main():
         # 用独立临时 profile（避免和正在跑的刷课任务冲突）
         ctx = p.chromium.launch_persistent_context(
             os.path.join(BASE, "jxjy_remote_profile"),
-            headless=False,
+            headless=HEADLESS,
             viewport={"width": 1280, "height": 900},
             args=["--no-first-run", "--disable-blink-features=AutomationControlled"],
         )
