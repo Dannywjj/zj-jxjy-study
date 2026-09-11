@@ -14,6 +14,12 @@
        c. 其他（time_up / running / 崩溃）→ 直接接力重启会话
     3. 若进程存活但 jxjy_study.log 超过 --hang-min 分钟没有更新 → 视为卡死，杀进程树后接力
 
+  退避（防止系统性故障时疯狂拉起浏览器、被平台风控盯上）：
+    连续接力失败 → 前两次立即重试，之后 5/15/30/60 分钟逐级放大；
+    一旦观察到"会话存活且日志 5 分钟内有更新"，计数立即清零（正常长跑接力不受影响）。
+    登录救援失败不走这条退避，而是按 --retry-min（默认 10 分钟）固定节流 ——
+    那是"等人工扫码"的正常等待，不是故障。
+
   救援（登录态失效时）：
     · 调 jxjy_remote_login.py：打开扫码页 → 把二维码邮件推给用户 → 等待扫码
       先无头模式（实测锁屏/无人值守也能截到二维码），失败再退化为有头窗口兜底
@@ -55,6 +61,10 @@ CHECK_INTERVAL = 180          # 巡检间隔（秒）
 HANG_MINUTES = 20             # 日志静默超过该分钟数视为卡死
 RETRY_MINUTES = 10            # 救援失败的节流间隔（分钟）
 MIN_SESSION_MIN = 10          # 剩余时间不足该分钟数时不再接力
+# 连续接力失败后的退避（分钟）：第 1/2 次立即重试，之后逐级放大，避免系统性故障时
+# 每 3 分钟就拉起一个浏览器、把平台风控刷出来
+BACKOFF_MINUTES = [0, 0, 5, 15, 30, 60]
+HEALTHY_RESET_SECONDS = 300   # 会话存活且日志 5 分钟内有更新 → 视为恢复正常，退避清零
 
 
 def log(msg):
@@ -213,6 +223,20 @@ def remaining_minutes(session_end):
     return int((session_end - datetime.now()).total_seconds() // 60)
 
 
+def apply_backoff(streak, dry_run=False):
+    """连续接力失败的退避：必要时先等一会儿，返回 +1 后的 streak。
+
+    前两次立即重试，之后 5/15/30/60 分钟逐级放大。
+    会话恢复正常（存活且日志新鲜）时会清零，因此不影响正常的长跑接力。
+    """
+    wait_s = BACKOFF_MINUTES[min(streak, len(BACKOFF_MINUTES) - 1)] * 60
+    if wait_s:
+        log(f"  连续第 {streak} 次接力仍失败，退避 {wait_s // 60} 分钟后重试")
+        if not dry_run:
+            time.sleep(wait_s)
+    return streak + 1
+
+
 # ---------------------------------------------------------------- 状态打印
 
 def print_status():
@@ -281,11 +305,14 @@ def main():
         f"（约 {(until - now).total_seconds() / 3600:.1f} 小时后）")
     log(f"会话终点：{session_end.strftime('%Y-%m-%d %H:%M:%S')}（接力时按剩余时间计算时长）")
     log(f"巡检间隔 {args.interval}s · 卡死阈值 {args.hang_min}min · 救援重试间隔 {args.retry_min}min")
+    log(f"接力退避：连续失败按 {BACKOFF_MINUTES} 分钟逐级放大（会话恢复正常即清零）")
+    log(f"救援顺序：先 --headless（锁屏可用）→ 失败再有头兜底，各 {args.wait_min} 分钟")
     if args.dry_run:
         log("注意：dry-run 模式，不会真的杀进程/推二维码/起会话")
     log("")
 
     last_rescue = 0.0
+    fail_streak = 0
     iteration = 0
 
     while datetime.now() < until:
@@ -294,6 +321,10 @@ def main():
 
         if running:
             age = study_log_age_min()
+            # 会话活着且日志新鲜 → 说明接力成功/正常长跑，退避计数清零
+            if fail_streak and age * 60 <= HEALTHY_RESET_SECONDS:
+                log(f"  刷课会话已恢复正常（日志 {age:.1f} 分钟前更新），接力退避计数清零")
+                fail_streak = 0
             if age > args.hang_min:
                 log(f"第 {iteration} 次巡检：进程存活（PID {pid}）但日志已 {age:.0f} 分钟无更新 → 疑似卡死")
                 if args.no_hang_kill:
@@ -303,6 +334,7 @@ def main():
                     time.sleep(5)
                     mins = remaining_minutes(session_end)
                     if mins >= MIN_SESSION_MIN:
+                        fail_streak = apply_backoff(fail_streak, args.dry_run)
                         launch_study(mins, "卡死重启", args.dry_run)
                     else:
                         log(f"  剩余 {mins} 分钟不足 {MIN_SESSION_MIN} 分钟，不再接力")
@@ -339,8 +371,9 @@ def main():
                     log(f"  救援未成功，{args.retry_min} 分钟后重试（期间可手动扫码，"
                         f"或运行 jxjy_login_window.py）")
         else:
-            # time_up / running / 崩溃 等：直接接力
+            # time_up / running / 崩溃 等：直接接力（连续失败则逐级退避）
             log(f"第 {iteration} 次巡检：刷课进程已结束（status={status}），准备接力")
+            fail_streak = apply_backoff(fail_streak, args.dry_run)
             launch_study(mins, f"会话结束接力（原 status={status}）", args.dry_run)
 
         time.sleep(args.interval)
