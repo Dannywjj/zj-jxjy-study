@@ -532,6 +532,28 @@ python jxjy_login_guard.py --dry-run --until ...     # 只记录将要执行的�
 - `jxjy_video_diag.py`：完整走链路确认 video 出现。
 - `jxjy_remote_login.py --demo`：只截一次二维码验证（不进入循环）。
 
+### 救援链路自检（跨天长跑前必做，约 3 分钟）
+
+长跑前建议跑一遍，确认"掉线时真的救得回来"（2026-09-11 全部实测通过）：
+
+1. **邮件通道**（不真发信，只验证 SSL + 授权码）：
+   ```python
+   import smtplib, json
+   cfg = json.load(open('jxjy_mail_config.json', encoding='utf-8'))
+   s = smtplib.SMTP_SSL(cfg.get('smtp_host','smtp.qq.com'), int(cfg.get('smtp_port',465)), timeout=30)
+   s.login(cfg['from_addr'], cfg['pass']); print(s.noop()); s.quit()   # 期望 250 OK
+   ```
+2. **二维码截图**：`python jxjy_remote_login.py --demo --headless` → 检查 `jxjy_login_qr.png`
+   是否为 ~9 KB 的**真二维码**（而非整页兜底截图）。无头可用 = **锁屏时也能救援**。
+3. **邮件报文构造**（用假 SMTP，不真发信）：把 `jxjy_remote_login.smtplib.SMTP_SSL` 替换为记录型假类，
+   调 `send_qr_email('jxjy_login_qr.png')`，再用 `email.message_from_string` 解析 ——
+   应得到 3 段 MIME、Subject「继续教育登录二维码」、附件 `login_qr.png`（`image/png`，
+   解码后字节数与原图一致）＝ 报文构造无误，只差网络投递。
+4. **接力启动**：在**隔离目录**放一份 `jxjy_login_guard.py` + `jxjy_daily_study.py`，调用
+   `launch_study(5, '测试')` —— 期望子进程被分离拉起、自行拿到 `jxjy_study.lock`、日志写进
+   该目录的 `jxjy_study.log`（隔离目录没有 `jxjy_state.json`，故会打印"未找到登录态文件"后干净退出并释放锁）。
+   因为锁与状态文件都在隔离目录，**这样测不会干扰真实会话**。
+
 ## 邮箱配置（远程扫码登录）
 
 配置文件：`.workbuddy/jxjy_mail_config.json`，脚本 `jxjy_remote_login.py` 启动时通过 `load_mail_config()` 自动读取，无需每次手动设置。**示例为占位符，请替换为你自己的真实配置后保存**：
