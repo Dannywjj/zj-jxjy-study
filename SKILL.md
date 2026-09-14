@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.6.2
+version: 1.6.3
 author: Dannywjj
 agent_created: true
 ---
@@ -39,6 +39,7 @@ agent_created: true
 - `jxjy_login_window.py` —— 电脑旁人工登录（短信/扫码，弹出 Chrome 窗口）；带 `--check` 可无头探测当前 profile 是否仍在线
 - `jxjy_remote_login.py` —— 远程扫码登录（截图二维码 + 邮件推送到手机）
 - `jxjy_download_cert.py` —— 刷满 90 后自动从平台拉取「会计专业技术人员继续教育学习证明」PDF（详见「学习证明自动拉取」一节）
+- `jxjy_chain_login_study_cert.sh` —— 三段链式：登录窗口等待 → 登录成功自动刷课 → 刷完自动拉证明（详见「学习证明自动拉取」一节）
 - `jxjy_state.json` —— Playwright 登录态（含 SSO_TOKEN + 正保 chinaacc cookie）
 - `jxjy_study.log` —— 统一日志
 - `jxjy_study_report.json` —— 本次会话报告（`status` 见「完成态语义」一节）
@@ -404,7 +405,15 @@ cd "<项目>/.workbuddy"
 ```
 退出码：`0`=成功；`2`=登录失效；`3`=等待超时仍未达标；`4`=达标但找不到按钮（已截图待人工辨识）。
 
-**与刷课链路结合（推荐）**——登录窗口 + 刷课 + 达标自动拉证明一气呵成：
+**与刷课链路结合（推荐）**——登录窗口 + 刷课 + 达标自动拉证明一气呵成。已封装为三段链式脚本
+`jxjy_chain_login_study_cert.sh`（登录窗口等待 → 检测到 `jxjy_login_success.flag` 即自动刷课 → 刷课结束自动拉证明）：
+```bash
+cd "<项目>/.workbuddy"
+bash jxjy_chain_login_study_cert.sh 90 240 180
+#   参数=登录窗口分钟  刷课时长分钟  证书轮询分钟
+# 用户只需在弹窗里扫码/短信登录一次，后续全自动，agent 无需值守。
+```
+等效手写版（便于理解/调试）：
 ```bash
 cd "<项目>/.workbuddy"
 rm -f jxjy_login_success.flag
@@ -417,6 +426,7 @@ fi
 
 > ⚠️ **平台「打印学习证明」按钮仅在总学分 ≥ 90 时才出现**；脚本下载前会确认达标，否则持续轮询直到出现。
 > ⚠️ 浙里办 SSO 会话 **< 9 小时**，拉证明动作务必在刷课当天的登录窗口内完成（跨天会随登录失效而失败）。
+> 🛠️ **课程收尾兜底（v1.6.3）**：个别课程媒体真实时长略小于播放器上报 `duration`，`ended` 事件不触发、`current` 卡在末尾不动（实测《我国会计服务市场监管体系研究》停在 26:06/26:39 整段 199 分钟不前进、0 学分入账）。`jxjy_daily_study.py` 现增加「卡在末尾(进度停滞 ≥3 次/约 60s) 按播完处理」兜底，避免整门课永远刷不完。
 
 ## 长跑守护：`jxjy_login_guard.py`（跨天/长会话必用）
 

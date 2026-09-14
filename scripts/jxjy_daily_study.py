@@ -928,6 +928,7 @@ def main():
                 }
                 last_t = time.time()
                 last_ct = None
+                stall_count = 0
 
                 # 循环监控当前课程播放
                 while time.time() < end_time:
@@ -962,8 +963,18 @@ def main():
                         log_msg = f"  {course_title[:20]} | current={fmt(current)}/{fmt(duration)} paused={paused} ended={ended}"
                         log(log_msg)
 
-                        if ended or (duration > 0 and current >= duration - 5):
-                            log("当前视频已播完")
+                        # 完成判定：正常 ended / 进度达末尾；以及「卡在末尾但不触发 ended」的兜底
+                        # （个别课程媒体真实时长略小于播放器上报 duration，ended 不触发，current 卡在末尾不动）
+                        near_end = duration > 0 and current >= duration * 0.95
+                        if near_end and last_ct is not None and abs(current - last_ct) < 1.0:
+                            stall_count += 1
+                        else:
+                            stall_count = 0
+                        if ended or (duration > 0 and current >= duration - 8) or stall_count >= 3:
+                            if stall_count >= 3:
+                                log("视频卡在末尾(进度停滞)，按播完处理并推进下一讲/下一课")
+                            else:
+                                log("当前视频已播完")
                             course_entry["end"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             report["courses"].append(course_entry)
                             save_report(report)
@@ -981,6 +992,7 @@ def main():
                                 }
                                 last_t = time.time()
                                 last_ct = None
+                                stall_count = 0
                                 continue
                             # 否则刷新学习中心，看是否有新课程
                             log("准备进入下一课程")
