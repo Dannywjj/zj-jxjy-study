@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.6.1
+version: 1.6.2
 author: Dannywjj
 agent_created: true
 ---
@@ -38,6 +38,7 @@ agent_created: true
 - `jxjy_daily_study.py` —— 每日刷课主脚本（仅参数：时长分钟数；**无自动关机**）
 - `jxjy_login_window.py` —— 电脑旁人工登录（短信/扫码，弹出 Chrome 窗口）；带 `--check` 可无头探测当前 profile 是否仍在线
 - `jxjy_remote_login.py` —— 远程扫码登录（截图二维码 + 邮件推送到手机）
+- `jxjy_download_cert.py` —— 刷满 90 后自动从平台拉取「会计专业技术人员继续教育学习证明」PDF（详见「学习证明自动拉取」一节）
 - `jxjy_state.json` —— Playwright 登录态（含 SSO_TOKEN + 正保 chinaacc cookie）
 - `jxjy_study.log` —— 统一日志
 - `jxjy_study_report.json` —— 本次会话报告（`status` 见「完成态语义」一节）
@@ -380,6 +381,42 @@ automation_update(
 > 而看门狗 `--on-all-done` 只认这两个值 → 「刷完再关机」形同虚设，实际永远只能到点关机。
 > 现已两侧补齐：脚本在学分达标（总 ≥ 90）时输出 `all_courses_done`；
 > 看门狗把 `done_no_more_courses` 也计入完成，并追加「看板学分数据 15 分钟内刷新且总学分达标」兜底判据。
+
+## 学习证明自动拉取（刷满 90 后）
+
+`jxjy_download_cert.py` —— 刷满 90 学分后，自动从浙江会计继续教育平台拉取
+「会计专业技术人员继续教育学习证明」PDF（与平台「查看详情 / 打印学习证明」同源，文件名按用户要求固定为 `会计专业技术人员继续教育学习证明.pdf`）。
+
+**触发**：用户说"刷完拉证明" / "下载学习证明" / "拿个结业证明"；或刷课 `all_courses_done` 之后。
+**前置**：登录态有效（`jxjy_state.json` 且浙里办 SSO 未过期，< 9 小时）。
+**原理**：
+1. 复刻进入学习中心导航（4 次重试 + 首页兜底）。
+2. 读取 2026 年度总学分；**未达标时每 60 秒轮询**（默认最多等 200 分钟）。
+3. 达标后在学习中心定位「打印学习证明 / 学习证明 / 下载证明」按钮并点击下载 PDF。
+4. 保存到 `继续教育证明/会计专业技术人员继续教育学习证明_YYYY-MM-DD.pdf`，
+   并复制为项目根 `会计专业技术人员继续教育学习证明.pdf`（用户指定文件名）。
+5. 兼容两种下载：① 浏览器文件下载（`expect_download`）；② 新标签页打印预览（`page.pdf`）。
+
+**命令**：
+```bash
+cd "<项目>/.workbuddy"
+"<venv>/Scripts/python.exe" jxjy_download_cert.py 200   # 200 = 达标前最多等待分钟
+```
+退出码：`0`=成功；`2`=登录失效；`3`=等待超时仍未达标；`4`=达标但找不到按钮（已截图待人工辨识）。
+
+**与刷课链路结合（推荐）**——登录窗口 + 刷课 + 达标自动拉证明一气呵成：
+```bash
+cd "<项目>/.workbuddy"
+rm -f jxjy_login_success.flag
+"<venv>/Scripts/python.exe" jxjy_login_window.py --wait 60 2>&1 | tee jxjy_login_window2.log
+if [ -f jxjy_login_success.flag ]; then
+  "<venv>/Scripts/python.exe" jxjy_daily_study.py 900 >> jxjy_study.log 2>&1
+  "<venv>/Scripts/python.exe" jxjy_download_cert.py 30   # 刷完即拉证明（登录仍有效）
+fi
+```
+
+> ⚠️ **平台「打印学习证明」按钮仅在总学分 ≥ 90 时才出现**；脚本下载前会确认达标，否则持续轮询直到出现。
+> ⚠️ 浙里办 SSO 会话 **< 9 小时**，拉证明动作务必在刷课当天的登录窗口内完成（跨天会随登录失效而失败）。
 
 ## 长跑守护：`jxjy_login_guard.py`（跨天/长会话必用）
 
