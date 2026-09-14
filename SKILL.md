@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.6.3
+version: 1.6.4
 author: Dannywjj
 agent_created: true
 ---
@@ -386,7 +386,15 @@ automation_update(
 ## 学习证明自动拉取（刷满 90 后）
 
 `jxjy_download_cert.py` —— 刷满 90 学分后，自动从浙江会计继续教育平台拉取
-「会计专业技术人员继续教育学习证明」PDF（与平台「查看详情 / 打印学习证明」同源，文件名按用户要求固定为 `会计专业技术人员继续教育学习证明.pdf`）。
+**平台自己出具的官方「继续教育学习证明」PDF**（与学习中心「查看详情 → 打印学习证明」按钮同源；
+文件名固定为 `会计专业技术人员继续教育学习证明.pdf`，平台通常同时提供 pdf / jpg / xml 三种格式，以 pdf 为准）。
+
+> ⚠️ **交付物口径（最关键，2026-09-15 用户明确）**：
+> **交付给用户的是「正保 / 浙江继续教育平台自己出具的官方学习证明」**，即本脚本从平台「查看详情 → 打印学习证明」
+> 拉取的 PDF（参考已落盘的 `继续教育证明/继续教育学习证明_2026-09-12.pdf` / `.jpg` / `.xml`）。
+> **绝不能**把本地用 `jxjy_dashboard_data.json` 自制的「完成情况证明」HTML / 网页另存 PDF 当成交付物 ——
+> 那只是登录态不可用、平台又打不开时的**兜底说明**，不具备官方效力，用户明确不要。
+> 若项目里出现 `jxjy_make_completion_proof.py` 这类本地生成脚本，只允许作离线兜底，默认不进入交付链路。
 
 **触发**：用户说"刷完拉证明" / "下载学习证明" / "拿个结业证明"；或刷课 `all_courses_done` 之后。
 **前置**：登录态有效（`jxjy_state.json` 且浙里办 SSO 未过期，< 9 小时）。
