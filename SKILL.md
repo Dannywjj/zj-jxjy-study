@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.6.0
+version: 1.6.1
 author: Dannywjj
 agent_created: true
 ---
@@ -62,7 +62,8 @@ agent_created: true
 
 1. **电脑旁 → 人工登录**：后台启动 `jxjy_login_window.py --wait 10`，弹出 Chrome 窗口，用户短信/扫码登录，脚本自动保存 `jxjy_state.json`。
 
-2. **人不在电脑旁 → 远程扫码登录**：后台启动 `jxjy_remote_login.py --wait 15`。
+2. **人不在电脑旁 → 远程扫码登录**：后台启动 `jxjy_remote_login.py --wait 5`
+   （⚠️ **二维码有效期实测仅约 60 秒**，见下「坑 0」；先确认用户在手机旁再发码，否则纯属白等 + 炸邮箱）。
    - 脚本打开登录页 → 切「扫码登录」tab → 截取二维码 canvas 存到 `jxjy_login_qr.png`。
    - 若存在 `jxjy_mail_config.json`，每个**内容变化**的二维码自动发一封带图片附件的邮件到用户邮箱
      （按 MD5 去重 + 最小 2 分钟间隔，避免 45 秒一轮的刷新炸邮箱）。
@@ -84,7 +85,16 @@ agent_created: true
 
 ### 登录重试实操经验（2026-09-10 踩坑）
 
-**坑 1：远程扫码窗口开太长会"邮件轰炸"**。二维码每约 45 秒刷新一次，`--wait 15` 会在 15 分钟内发出 **约 20 封**邮件，明显骚扰用户。
+**坑 0（2026-09-14 实测，最关键）：二维码真实有效期 ≈ 60 秒，远程邮件扫码通道基本不可用。**
+无头登录页实测时间线：t=4s~56s 页面无任何失效文案、canvas 不变；
+**t=67s 出现「二维码已失效 / 请点击刷新」，canvas 内容同时改变** → 即平台侧二维码 TTL ≈ 60 秒（并非脚本误判）。
+后果：`邮件 → 打开邮件 → 保存图片 → 相册扫一扫` 的链路通常 > 60 秒，用户看到的码**早已失效**，
+因此历次"远程扫码救援"屡屡失败（用户最终都只能回到电脑旁重新登录）。
+→ **规则**：远程扫码**只在用户明确说"我现在在手机旁"时才发码**，并提醒"收到立刻扫，码只有 60 秒"；
+   无人值守时不要指望邮件通道能救回来，跨天任务宁可提前挂 `jxjy_login_guard.py` 并默认用户会在电脑前。
+→ **可靠路径永远是「电脑旁 `jxjy_login_window.py`」**（窗口内可手动点「刷新」续码，不受 60 秒限制影响使用节奏）。
+
+**坑 1：远程扫码窗口开太长会"邮件轰炸"**。二维码每约 45 秒刷新一次，`--wait 15` 会在 15 分钟内发出 **约 20 封**邮件，明显骚扰用户（2026-09-14 实测 `--wait 10` 也发了 **17 封**）。
 → **远程扫码请把 `--wait` 控制在 5 分钟以内**；超时后先问用户"方便时告诉我，我再发一次"，不要直接再开 15 分钟窗口。
 
 **坑 2：登录窗口超时后用户往往还没回来**。连开两次窗口都容易白等。

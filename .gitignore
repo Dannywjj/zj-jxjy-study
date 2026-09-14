@@ -21,6 +21,9 @@ __pycache__/
 .venv/
 venv/
 
+# ==== 本地助理数据（记忆/自动化记录，含个人上下文，公开仓库绝不提交）====
+.workbuddy/
+
 # ==== 系统 / 编辑器 ====
 .DS_Store
 Thumbs.db

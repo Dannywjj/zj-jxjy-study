@@ -39,10 +39,12 @@ import os
 import subprocess
 import sys
 import time
+import atexit
 from datetime import datetime, timedelta
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable or "python"
+GUARD_LOCK = os.path.join(BASE, "jxjy_guard.lock")
 
 LOCK_FILE = os.path.join(BASE, "jxjy_study.lock")
 REPORT_FILE = os.path.join(BASE, "jxjy_study_report.json")
@@ -54,6 +56,55 @@ REMOTE_LOGIN = os.path.join(BASE, "jxjy_remote_login.py")
 
 # 真正"全部刷完"的完成态（与看门狗 ALL_DONE_STATUSES 保持一致）
 DONE_STATUSES = {"all_courses_done", "completed", "done_no_more_courses"}
+
+
+def _guard_pid_alive(pid):
+    """Windows 下判断进程是否存活（tasklist 输出为 GBK，errors=replace 防解码崩溃）"""
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "PID eq %d" % pid, "/NH"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=10
+        ).stdout
+        return str(pid) in out
+    except Exception:
+        return False
+
+
+def acquire_guard_lock():
+    """守护自身单实例锁。已有存活实例返回 (False, 占用者PID)。
+
+    背景：2026-09-12 曾出现两个守护并行 —— 各自拉起无头浏览器抢同一个二维码文件，
+    产生 9 个 chrome 进程。刷课脚本有锁所以从没重复过，守护此前没有，故补上。
+    """
+    try:
+        if os.path.exists(GUARD_LOCK):
+            old = 0
+            try:
+                old = int(open(GUARD_LOCK, encoding="utf-8").read().strip() or 0)
+            except (ValueError, OSError):
+                old = 0
+            if old and old != os.getpid() and _guard_pid_alive(old):
+                return False, old
+        with open(GUARD_LOCK, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        return True, os.getpid()
+    except OSError as e:
+        log("单实例锁异常（忽略，继续运行）: %s" % e)
+        return True, os.getpid()
+
+
+def release_guard_lock():
+    """仅当锁是本进程写的才删除，避免误删他人锁。"""
+    try:
+        if os.path.exists(GUARD_LOCK):
+            cur = open(GUARD_LOCK, encoding="utf-8").read().strip()
+            if cur == str(os.getpid()):
+                os.remove(GUARD_LOCK)
+    except OSError:
+        pass
+
+
 # 登录态失效的特征
 LOGIN_HINTS = ("zjzwfw.gov.cn", "未能进入学习中心", "ssoLogin", "请先运行 jxjy_login_window")
 
@@ -298,6 +349,13 @@ def main():
     until = parse_ts(args.until, (now + timedelta(days=1)).replace(
         hour=3, minute=0, second=0, microsecond=0))
     session_end = parse_ts(args.session_end, until)
+
+    ok, owner = acquire_guard_lock()
+    if not ok:
+        print("已有守护实例在运行（PID %d），本次跳过退出。" % owner)
+        log("检测到已有守护实例（PID %d），本次自动退出，避免重复拉起浏览器" % owner)
+        return 0
+    atexit.register(release_guard_lock)
 
     log("=== 继续教育登录态守护启动 ===")
     log(f"当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}")

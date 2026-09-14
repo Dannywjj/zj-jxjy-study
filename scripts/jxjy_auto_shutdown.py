@@ -27,13 +27,61 @@ import os
 import subprocess
 import sys
 import time
+import atexit
 from datetime import datetime, timedelta
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 REPORT = os.path.join(BASE, "jxjy_study_report.json")
 DASH = os.path.join(BASE, "jxjy_dashboard_data.json")
 LOG = os.path.join(BASE, "jxjy_shutdown.log")
+SHUTDOWN_LOCK = os.path.join(BASE, "jxjy_shutdown.lock")
 CHECK_INTERVAL = 30  # 秒
+
+
+def _shutdown_pid_alive(pid):
+    """Windows 下判断进程是否存活（tasklist 输出为 GBK，errors=replace 防解码崩溃）"""
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "PID eq %d" % pid, "/NH"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=10
+        ).stdout
+        return str(pid) in out
+    except Exception:
+        return False
+
+
+def acquire_shutdown_lock():
+    """看门狗自身单实例锁。已有存活实例返回 (False, 占用者PID)。
+
+    背景：2026-09-12 曾出现两个看门狗并行，会重复发出 shutdown 指令。
+    """
+    try:
+        if os.path.exists(SHUTDOWN_LOCK):
+            old = 0
+            try:
+                old = int(open(SHUTDOWN_LOCK, encoding="utf-8").read().strip() or 0)
+            except (ValueError, OSError):
+                old = 0
+            if old and old != os.getpid() and _shutdown_pid_alive(old):
+                return False, old
+        with open(SHUTDOWN_LOCK, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        return True, os.getpid()
+    except OSError as e:
+        log("单实例锁异常（忽略，继续运行）: %s" % e)
+        return True, os.getpid()
+
+
+def release_shutdown_lock():
+    """仅当锁是本进程写的才删除，避免误删他人锁。"""
+    try:
+        if os.path.exists(SHUTDOWN_LOCK):
+            cur = open(SHUTDOWN_LOCK, encoding="utf-8").read().strip()
+            if cur == str(os.getpid()):
+                os.remove(SHUTDOWN_LOCK)
+    except OSError:
+        pass
 
 # 所有课程真正刷完。
 # 注意：done_no_more_courses = 学习中心已无可继续学习的课程，等价于"刷完了"。
@@ -156,6 +204,13 @@ def main():
     ap.add_argument("--on-study-done", action="store_true",
                     help="本次刷课会话结束（含 time_up 计时到点）时提前关机")
     args = ap.parse_args()
+
+    ok, owner = acquire_shutdown_lock()
+    if not ok:
+        print("已有关机看门狗在运行（PID %d），本次跳过退出。" % owner)
+        log("检测到已有关机看门狗（PID %d），本次自动退出，避免重复发出关机指令" % owner)
+        return 0
+    atexit.register(release_shutdown_lock)
 
     explicit_time = bool(args.at) or (args.after is not None) or bool(args.date)
 
