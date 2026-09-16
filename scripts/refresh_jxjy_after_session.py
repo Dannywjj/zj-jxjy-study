@@ -18,8 +18,11 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(BASE, "jxjy_state.json")
 DATA = os.path.join(BASE, "jxjy_dashboard_data.json")
 
+# 学习年度：默认取当前自然年；跨年补学场景可用 JXJY_YEAR 环境变量覆盖
+STUDY_YEAR = int(os.environ.get("JXJY_YEAR") or datetime.datetime.now().year)
+
 LEARN_URL = "https://jxjy.czt.zj.gov.cn/front/golearncenterNew.html"
-SELECT_URL = "https://jxjy.czt.zj.gov.cn/front/goSelectSchoolNew.html?syear=2026"
+SELECT_URL = f"https://jxjy.czt.zj.gov.cn/front/goSelectSchoolNew.html?syear={STUDY_YEAR}"
 SCHOOL = "https://jxjy.chinaacc.com/learningCenter"
 
 CREDIT_REQUIREMENT = {"total": 90.0, "major": 60.0, "public": 18.0}
@@ -73,9 +76,9 @@ def parse_credits(text):
     if total is not None and major is not None and pub is not None:
         return {"total_got": total, "major_got": major, "public_got": pub, "via": "progress-text"}
 
-    # 兜底：表格行「2026 总 公需 专业」
+    # 兜底：表格行「<年度> 总 公需 专业」
     for line in text.split("\n"):
-        if "2026" not in line:
+        if str(STUDY_YEAR) not in line:
             continue
         nums = re.findall(r"\d+\.?\d*", line)
         if len(nums) >= 4:
@@ -95,7 +98,7 @@ def save_credits(c):
             data = json.load(f)
     except Exception:
         data = {}
-    data.setdefault("year", 2026)
+    data.setdefault("year", STUDY_YEAR)
     data.setdefault("student", "学员")
     data.setdefault("today_got", 0.0)
     data.setdefault("today_got_note", "较上次记录增加")

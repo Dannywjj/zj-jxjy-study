@@ -98,13 +98,14 @@ AI 会启动脚本，每天 9:00 自动运行 15 小时。
 
 1. 下载本仓库（`SKILL.md` + `scripts/` 目录）
 2. 复制 `SKILL.md` 到 `C:\Users\<你的用户名>\.workbuddy\skills\zj-jxjy-study\SKILL.md`
-3. 把 `scripts/` 下的 6 个 `.py` 文件复制到你项目的 `.workbuddy/` 目录（⚠️ 必须放这里，脚本按自身所在目录读写 `jxjy_state.json` 等状态文件）
-4. 重启 WorkBuddy Desktop
+3. 把 `scripts/` 下的 10 个 `.py` 文件复制到你项目的 `.workbuddy/` 目录（⚠️ 必须放这里，脚本按自身所在目录读写 `jxjy_state.json` 等状态文件）。链式脚本 `jxjy_chain_login_study_cert.sh` 为可选，需要「登录→刷课→拉证明」一键串联时才复制
+4. 安装依赖：`playwright`、`PIL`，并执行 `playwright install chromium`
+5. 重启 WorkBuddy Desktop
 
 ### 方式三：项目级安装（团队共享）
 
 1. 把 SKILL.md 复制到项目的 `.workbuddy/skills/zj-jxjy-study/SKILL.md`
-2. 把 `scripts/` 下的 6 个 `.py` 复制到项目的 `.workbuddy/` 目录
+2. 把 `scripts/` 下的 10 个 `.py` 复制到项目的 `.workbuddy/` 目录（并实现 `playwright install chromium`）
 3. ⚠️ 注意：项目级 skill 对所有项目成员可见，**不要带个人邮箱/账号配置**
 
 ---
@@ -152,6 +153,23 @@ python jxjy_login_window.py --wait 10
 ```
 
 成功后会在 `.workbuddy/jxjy_state.json` 保存登录态（含 SSO_TOKEN + 正保 chinaacc cookie，约 40+ 条）。
+
+> 🔒 **登录态就是你的账号凭证**：**不要**把 `jxjy_state.json` 拷给别人，也不要提交到仓库
+> （本仓库 `.gitignore` 已排除）。两个人共用同一份登录态会互相踢下线，两边都刷不成——每个人各自登录一次即可。
+
+---
+
+## 换账号 / 换年度要改什么
+
+脚本本身不含任何个人信息（无姓名、手机号、邮箱、目录名），换到新的号上跑只需各人自己准备登录态和邮箱配置。
+
+| 参数 | 默认值 | 什么时候要改 |
+|---|---|---|
+| 学习年度 | 当前自然年 | 跨年补学（如 2027 年还在补 2026 年度）→ 设环境变量 `JXJY_YEAR=2026` |
+| 正保学习计划 ID | 自动从学习中心页面识别 | 拉证报「未找到打印信息」时手动指定：`jxjy_download_cert.py 200 --study-id <ID>` |
+
+学习计划 ID 的取值优先级：`--study-id` > 环境变量 `JXJY_STUDY_ID` > 页面动态识别 > 内置兜底值。
+每次启动会在日志里打印用了哪个来源，便于排查。
 
 ---
 

@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.6.5
+version: 1.7.0
 author: Dannywjj
 agent_created: true
 ---
@@ -18,6 +18,31 @@ agent_created: true
 > 1. 在自己的项目 `.workbuddy/jxjy_mail_config.json` 填入自己的 QQ / 163 / Gmail 邮箱配置（**SMTP 必须用授权码，不要用登录密码**）。
 > 2. 在 `.workbuddy/jxjy_state.json` 准备好浙里办 SSO + 正保 chinaacc 登录态（可由 `jxjy_remote_login.py` 或 `jxjy_login_window.py` 生成）。
 > 3. 不要把带个人配置的文件提交到任何公开仓库。
+
+## 换账号 / 给别人用的落地清单（脱敏 checklist）
+
+本 skill **不含任何个人账号信息**，脚本里没有写死姓名、手机号、邮箱、所在目录。
+换到一个全新的号上跑，只需按下面四步准备；**唯一不能共享的是登录态**。
+
+| # | 要做的事 | 说明 | 能否从别人那儿拷 |
+|---|---|---|---|
+| 1 | 装 skill | `SKILL.md` 放到 `~/.workbuddy/skills/zj-jxjy-study/SKILL.md` | ✅ 可以 |
+| 2 | 放脚本 | `scripts/` 下 10 个 `.py` → 自己项目的 `.workbuddy/`（**必须放这里**，脚本按自身目录读写状态文件） | ✅ 可以 |
+| 3 | **生成自己的登录态** | 跑 `jxjy_login_window.py`，本人扫码/短信登录，产出 `jxjy_state.json` | ❌ **绝对不能拷** |
+| 4 | 填自己的邮箱 | `jxjy_mail_config.json`（SMTP 授权码，非登录密码） | ❌ 不能拷 |
+
+> ⚠️ **第 3 步是硬隔离**：`jxjy_state.json` 就是那个人的登录凭证，拷给别人 = 把账号交出去，
+> 而且两个人同时用同一份登录态会**互相踢下线**，两边都刷不成。必须各自登录。
+
+**两个可能需要调的参数**（换账号 / 跨年度时）：
+
+| 参数 | 默认值 | 什么情况下要改 |
+|---|---|---|
+| 学习年度 | 当前自然年 | 跨年补学（如 2027 年还在补 2026 年度）→ `set JXJY_YEAR=2026` |
+| 学习计划 ID | 自动识别，兜底 21037 | 拉证报「未找到打印信息」且日志显示用了兜底值 → `jxjy_download_cert.py 200 --study-id <真实ID>` |
+
+> 换年度时先看这几个地方：`refresh_jxjy_after_session.py` 的选课 URL 带 `syear=`、
+> 学分面板抓的是含年度的那一行。两者都跟随上面的学习年度参数，不需要改代码。
 
 ## 触发场景
 
@@ -383,6 +408,28 @@ automation_update(
 > 现已两侧补齐：脚本在学分达标（总 ≥ 90）时输出 `all_courses_done`；
 > 看门狗把 `done_no_more_courses` 也计入完成，并追加「看板学分数据 15 分钟内刷新且总学分达标」兜底判据。
 
+## 年度达标后的收尾（自动化运维，2026-09-16 实践）
+
+学分三项全部达标（总 ≥90 且 专业 ≥60 且 公需 ≥18）后，**继续每天 09:00 跑刷课没有意义**：
+
+- 平台已无「打印学习证明」之外的增量，刷课脚本只会因为登录态过期反复报 `status=error`，
+  每天一条失败提醒反而制造噪音（实测 2026-09-16 16:43 就是这样一次空跑）。
+- **核对顺序（接到"继续教育自动更新/怎么还在刷"类需求时先做这三步）**：
+  1. `cat .workbuddy/jxjy_dashboard_data.json` → 看 `total/major/public` 的 got vs need；
+  2. `cat .workbuddy/jxjy_study_report.json` → 看最近一次 status（error 且含 `zjzwfw.gov.cn` = 登录态过期，不是脚本坏了）；
+  3. 项目根目录是否已有 `会计专业技术人员继续教育学习证明.pdf` / `继续教育证明/` 目录 → 有即证明已归档。
+
+**收尾动作**：
+
+| 动作 | 说明 |
+|---|---|
+| 暂停 09:00 刷课任务 | `automation_update mode=update id=<刷课任务id> status=PAUSED`；同时在 prompt 开头加一段「某年度已达标、本任务已暂停、恢复前先确认是否新年度」的说明，避免日后误判为故障 |
+| 保留 12:00 看板刷新任务 | 数据不再变化，但保留可让看板不显示陈旧时间戳；其 prompt 里补一句「抓取失败简要说明即可、不要重试/打扰用户」 |
+| 不要删除任务 | 新年度（一般 1 月起）直接改回 `ACTIVE` + 更新年度，比重建省事 |
+
+> 恢复刷课的唯一信号：**进入新年度** 或 用户明确要求继续刷（如换了工作/补学）。
+> 恢复时记得 `jxjy_state.json` 大概率已过期，需先走一次人工登录。
+
 ## 学习证明自动拉取（刷满 90 后）
 
 `jxjy_download_cert.py` —— 刷满 90 学分后，自动从**正保会计网校学习中心**拉取
@@ -399,8 +446,9 @@ automation_update(
 **触发**：用户说"刷完拉证明" / "下载学习证明" / "拿个结业证明"；或刷课 `all_courses_done` 之后。
 **前置**：登录态有效（`jxjy_state.json` 且浙里办 SSO 未过期，< 9 小时）。
 **真实入口（2026-09-14 实测，已跑通）**：
-- 正保学习中心「证书打印 / 去打印」按钮 → `https://jxjy.chinaacc.com/mgt/certPrint?studyID=21037`
-  （STUDY_ID=21037 为 2026 学习计划 ID，与 `isContinueLearning(...,21037,...)` 一致）。
+- 正保学习中心「证书打印 / 去打印」按钮 → `https://jxjy.chinaacc.com/mgt/certPrint?studyID=<学习计划ID>`
+  （2026 学习计划 ID 实测为 21037，与页面上的 `isContinueLearning(...,21037,...)` 一致；
+   **不同账号 / 不同年度可能不同**，脚本会自动解析，见下方「学习计划 ID 怎么定」）。
 - **不是**浙江平台 `golearncenterNew.html` 的「查看详情」页 —— 那个页**只有「查看详情」、没有打印按钮**，
   原脚本在此页找按钮必然失败（退出码 4）。现已改为直连上面的 certPrint 地址。
 - 全国平台 `ausm.mof.gov.cn` 的「会计人员继续教育登记 → 学习证明」是**权威备份源**（浙江平台明文：
@@ -409,7 +457,20 @@ automation_update(
 
 **原理**：
 1. 读本地汇总总学分（来自 `jxjy_dashboard_data.json`）；**未达标时每 60 秒轮询**（默认最多等 180 分钟）。
-2. 达标后用 `jxjy_state.json` 的 mgt 会话直连 `certPrint?studyID=21037`。
+2. 达标后用 `jxjy_state.json` 的 mgt 会话直连 `certPrint?studyID=<解析出的学习计划ID>`。
+
+**学习计划 ID 怎么定（换账号 / 跨年度必看）**：
+脚本启动时先把学习中心页面打开一次，按以下优先级确定 studyID，并在日志里打印来源：
+
+| 优先级 | 来源 | 用法 |
+|---|---|---|
+| 1 | 命令行 | `jxjy_download_cert.py 200 --study-id 31234` |
+| 2 | 环境变量 | `set JXJY_STUDY_ID=31234` |
+| 3 | 页面动态识别 | 自动从 `isStudyThisCourse(...,<ID>,...)` / `isContinueLearning(...)` / `studyID=` 提取 |
+| 4 | 内置默认值 | `21037`（2026 实测值，换人换年度后可能不适用） |
+
+> 排查：拉证失败且日志显示来源是「内置默认值」，多半就是这个 ID 不对。
+> 让用户在浏览器打开学习中心 → 右键查看源码搜 `studyID=` 拿到真实值，用方式 1 或 2 指定即可。
 3. 页面出现「下载」类链接 → 逐个点击触发浏览器下载（PDF/JPG/XML）。
 4. 保存到 `继续教育证明/继续教育学习证明_YYYY-MM-DD.pdf`，并复制为项目根 `会计专业技术人员继续教育学习证明.pdf`。
 5. 若页面返回「**未找到打印信息**」→ 该学习计划当前**尚未生成可打印证书**（多半计划仍在"进行中"，
@@ -419,6 +480,7 @@ automation_update(
 ```bash
 cd "<项目>/.workbuddy"
 "<venv>/Scripts/python.exe" jxjy_download_cert.py 200   # 200 = 达标且可打印前最多等待分钟
+"<venv>/Scripts/python.exe" jxjy_download_cert.py 200 --study-id 31234   # 手动指定学习计划 ID
 ```
 退出码：`0`=成功；`2`=登录失效；`3`=等待超时仍未拉到；`4`=达标但平台「未找到打印信息」（证书暂不可打印，待平台完结/刷新）。
 
@@ -603,10 +665,12 @@ python jxjy_login_guard.py --dry-run --until ...     # 只记录将要执行的�
 
 ## 调试脚本
 
-- `jxjy_chain_diag.py`：验证浙江平台 → 正保跳转后 chinaacc cookie。
-- `jxjy_course_diag.py`：直接访问 courseware 页检查登录态。
-- `jxjy_video_diag.py`：完整走链路确认 video 出现。
-- `jxjy_remote_login.py --demo`：只截一次二维码验证（不进入循环）。
+- `jxjy_remote_login.py --demo`：只截一次二维码验证（不进入循环）；加 `--headless` 可验证锁屏场景下的救援能力。
+- `jxjy_login_guard.py --status`：一行看清进程 / 报告 / 日志 / 登录态新鲜度，排障首选。
+- `jxjy_pubcourse_list.py`：枚举全部公需课（分类 / 名称 / 时长 / 学分 / 状态），挑课时用。
+
+> 注：早期版本文档曾列过 jxjy_chain_diag / jxjy_course_diag / jxjy_video_diag 三个调试脚本，
+> 但它们在仓库中从未存在；对应的 cookie、登录态、video 链路排查请改用上面三条等价命令。
 
 ### 救援链路自检（跨天长跑前必做，约 3 分钟）
 

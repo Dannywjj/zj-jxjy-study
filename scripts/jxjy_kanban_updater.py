@@ -6,13 +6,16 @@
 用法：
   python jxjy_kanban_updater.py
 """
-import os, json, re
+import os, json, re, datetime
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WB = os.path.join(BASE, ".workbuddy")
 DATA_FILE = os.path.join(WB, "jxjy_dashboard_data.json")
 COURSES_FILE = os.path.join(WB, "jxjy_courses.json")
 KANBAN = os.path.join(BASE, "继续教育看板.html")
+
+# 学习年度：默认取当前自然年；跨年补学场景可用 JXJY_YEAR 环境变量覆盖
+STUDY_YEAR = int(os.environ.get("JXJY_YEAR") or datetime.datetime.now().year)
 
 
 def load(path):
@@ -26,7 +29,7 @@ def build_kanban_data():
     return {
         "updated_at": d.get("updated_at", ""),
         "student": d.get("student", ""),
-        "year": d.get("year", 2026),
+        "year": d.get("year", STUDY_YEAR),
         "total": d.get("total", {"got": 0, "need": 90}),
         "major": d.get("major", {"got": 0, "need": 60}),
         "public": d.get("public", {"got": 0, "need": 18}),

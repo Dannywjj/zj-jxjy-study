@@ -40,6 +40,10 @@ LATEST_OVERVIEW = None
 # 浙江会计继续教育年度学分要求
 CREDIT_REQUIREMENT = {"total": 90.0, "major": 60.0, "public": 18.0}
 
+# 学习年度：默认取当前自然年。
+# 跨年补学场景（例如 2027 年仍在补 2026 年度学分）用环境变量覆盖：set JXJY_YEAR=2026
+STUDY_YEAR = int(os.environ.get("JXJY_YEAR") or datetime.datetime.now().year)
+
 
 def log(msg):
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -55,7 +59,7 @@ def save_report(data):
 
 
 def fetch_credit_overview(page):
-    """从学习中心页面抓取 2026 年度学分总览。
+    """从学习中心页面抓取当年度学分总览。
 
     优先用「学分进度」文本精确解析（唯一、无歧义）：
       学习总学分进度： 51.6/90  专业课学分进度： 51.6/60  公需课学分进度： 0/18
@@ -69,7 +73,7 @@ def fetch_credit_overview(page):
         mp = re.search(r"公需课学分进度[：:]\s*([\d.]+)\s*/\s*([\d.]+)", body)
         if mt and mm and mp:
             return {
-                "year": 2026,
+                "year": STUDY_YEAR,
                 "total_got": float(mt.group(1)),
                 "major_got": float(mm.group(1)),
                 "public_got": float(mp.group(1)),
@@ -85,13 +89,13 @@ def fetch_credit_overview(page):
                 text = row.inner_text().replace("\n", " ").replace("\t", " ")
             except Exception:
                 continue
-            if "2026" not in text:
+            if str(STUDY_YEAR) not in text:
                 continue
             # 提取数字：年度 总学分 公需学分 专业学分
             nums = re.findall(r"\d+\.?\d*", text)
             if len(nums) >= 4:
                 return {
-                    "year": 2026,
+                    "year": STUDY_YEAR,
                     "total_got": float(nums[1]),
                     "public_got": float(nums[2]),
                     "major_got": float(nums[3]),
@@ -269,7 +273,7 @@ def save_dashboard_data(overview, current_course=None, current_section=None, tod
 
         data = {
             "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "year": 2026,
+            "year": STUDY_YEAR,
             "student": old.get("student", "学员"),
             "total": {"got": total_got, "need": total_need},
             "major": {"got": major_got, "need": major_need},
@@ -445,7 +449,7 @@ def open_learning_center(ctx):
         page.wait_for_timeout(5000)
     log(f"学习中心已打开: {page.url}")
 
-    # 抓取 2026 年度学分总览并保存（用于看板展示）
+    # 抓取当年度学分总览并保存（用于看板展示）
     try:
         overview = fetch_credit_overview(page)
         if overview:
