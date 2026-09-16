@@ -2,16 +2,41 @@
 name: zj-jxjy-study
 display_name: 浙江会计继续教育自动刷课
 display_name_en: Zhejiang Accounting CPE Auto-Study
-description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO / 正保网校 chinaacc / 90 学分）。用于每日自动登录学习中心、播放视频、跳过已学完课程、判断学分累计、刷新看板数据；登录态隔夜失效时自动触发远程扫码登录（SMTP 邮件推送二维码）。触发词：继续教育、会计继续教育、浙里办学习中心、正保网校、自动刷课、刷学分、学分没动、视频不播放、远程扫码登录、登录态过期、继续教育看板。
-description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
-description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
+description: 浙江会计继续教育自动刷课（90 学分 / 浙里办 SSO / 正保网校 chinaacc / 一键闭环）。跑一次向导配置年度与学分目标，扫码登录后一条命令自动刷满 90 学分、下载官方学习证明 PDF、结算过目后归档清理并复位待下一年度。支持长跑守护、跨课程自动衔接、卡末尾死锁兜底；登录态过期时自动邮件推送二维码远程补登。全程不接触账号密码（平台仅开放浙里办扫码登录）。触发词：继续教育、会计继续教育、浙里办学习中心、正保网校、自动刷课、刷学分、学分没动、视频不播放、远程扫码登录、登录态过期、继续教育看板、学习证明、继续教育证书。
+description_zh: 面向浙江会计从业者的继续教育自动刷课技能：向导配置年度与学分目标 → 扫码登录 → 一键刷满 90 学分 → 下载官方学习证明 PDF → 结算过目后归档清理并复位。含长跑守护与卡末尾死锁兜底；登录态过期时通过 SMTP 邮件推送二维码远程补登。全程不接触账号密码。
+description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Set year and credit targets via a wizard, scan a QR code once, then one command drives it all the way to 90 credits, downloads the official completion certificate PDF, and archives itself for next year after you review the settlement report. No username or password is ever handled — the platform only exposes Zheliban SSO QR login.
 category: productivity
 version: 1.8.0
 author: Dannywjj
+license: MIT
 agent_created: true
 ---
 
 # 浙江会计继续教育自动刷课运维
+
+## 脚本在哪里（动手前先确认，别一上来就报「找不到脚本」）
+
+本 skill 支持两种安装布局，**按序号顺序找，命中哪个用哪个**：
+
+| 优先级 | 脚本位置 | 常见于 |
+|---|---|---|
+| 1 | `<项目根>/.workbuddy/jxjy_*.py` | 手动安装 / 存量用户 |
+| 2 | `~/.workbuddy/skills/zj-jxjy-study/scripts/*.py` | 从市场安装（自带脚本） |
+| 3 | 两处都没有 | 让用户把布局 2 的脚本复制到布局 1 |
+
+一条命令判定（Windows Git Bash）：
+
+```bash
+ls .workbuddy/jxjy_setup.py 2>/dev/null && echo "布局1" \
+  || ls ~/.workbuddy/skills/zj-jxjy-study/scripts/jxjy_setup.py 2>/dev/null && echo "布局2"
+```
+
+命中**布局 2** 时，本文所有命令把脚本路径换成
+`~/.workbuddy/skills/zj-jxjy-study/scripts/<脚本名>.py` 再执行。
+
+> 状态文件（`jxjy_state.json`、`jxjy_config.json`）**落在脚本所在目录** ——
+> 脚本用 `BASE = 脚本自身目录` 定位。所以布局 2 下它们出现在 `scripts/` 里，
+> 这是正常的，不要以为是安装出错。Windows 上 `~` = `C:\Users\<你的用户名>`。
 
 > ⚠️ **使用前必读（首次安装）**
 > 本 skill 是通用模板，**不含**你的账号/邮箱/SMTP 授权码等个人信息。使用者需要：

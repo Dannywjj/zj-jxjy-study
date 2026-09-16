@@ -94,9 +94,48 @@ python jxjy_full_run.py --status   # 只想看进度时用这个，不刷课
 
 ---
 
+## 更新与禁用
+
+### 怎么更新
+
+| 安装方式 | 更新机制 | 操作 |
+|---|---|---|
+| WorkBuddy 市场安装 | 有。系统会对已安装 skill 检测新版本（返回值里的 `updateAvailable`） | 有更新时重装一次即可；**但目前市场停在 1.2.0，不会自动追平本仓库** |
+| 手动安装（GitHub / zip） | 无自动更新，本机不会知道上游改了什么 | 重新拉取覆盖，见下方 |
+
+手动安装升级到最新版：
+
+```bash
+git clone https://github.com/Dannywjj/zj-jxjy-study.git /tmp/zj-jxjy-study
+cp /tmp/zj-jxjy-study/scripts/*.py <your-project>/.workbuddy/
+cp /tmp/zj-jxjy-study/SKILL.md ~/.workbuddy/skills/zj-jxjy-study/SKILL.md
+```
+
+> 覆盖不会动 `jxjy_config.json`、`jxjy_state.json` 和 `继续教育证明/` —— 过程数据与个人凭证是分开存的。
+> 升级后看一眼 `SKILL.md` 顶部的 `version` 确认落到位了。
+
+### 怎么禁用
+
+按需要选一种：
+
+1. **临时停用**：在 WorkBuddy 的技能管理界面关掉开关
+2. **停用但保留文件**：编辑 `SKILL.md`，在顶部 frontmatter 加一行
+
+   ```yaml
+   disable: true
+   ```
+
+   改回 `disable: false` 或删掉这行即可恢复。这是 WorkBuddy 官方 skill 通用的字段。
+3. **彻底删除**：删掉 `~/.workbuddy/skills/zj-jxjy-study/` 和项目 `.workbuddy/` 下 13 个 `jxjy_*.py`
+
+> ⚠️ 别「只删脚本留 SKILL.md」—— AI 读得到文档却找不到脚本，比没有更容易出错。
+> 要么整体停用，要么整套删干净。
+
+---
+
 ## 详细安装步骤
 
-### 方式一：WorkBuddy 市场安装（推荐）
+### 方式一：WorkBuddy 市场安装
 
 ```
 装个 zj-jxjy-study
@@ -104,18 +143,23 @@ python jxjy_full_run.py --status   # 只想看进度时用这个，不刷课
 
 按提示确认安装即可。安装位置：`C:\Users\<你的用户名>\.workbuddy\skills\zj-jxjy-study\`
 
-### 方式二：手动安装
+> ⚠️ **市场版本落后于本仓库**。截至 2026-09-16，推荐市场上的仍是 **1.2.0**，
+> 缺长跑守护、拉证脚本、1.6.3 卡末尾兜底、换账号支持与 1.8.0 的一键闭环。
+> 装完之后请在 skills 目录对照 `SKILL.md` 顶部的 `version` 字段确认；
+> 想要最新版请用下方「方式二」从 GitHub 取。
+
+### 方式二：手动安装（推荐，版本最新）
 
 1. 下载本仓库（`SKILL.md` + `scripts/` 目录）
 2. 复制 `SKILL.md` 到 `C:\Users\<你的用户名>\.workbuddy\skills\zj-jxjy-study\SKILL.md`
-3. 把 `scripts/` 下的 10 个 `.py` 文件复制到你项目的 `.workbuddy/` 目录（⚠️ 必须放这里，脚本按自身所在目录读写 `jxjy_state.json` 等状态文件）。链式脚本 `jxjy_chain_login_study_cert.sh` 为可选，需要「登录→刷课→拉证明」一键串联时才复制
+3. 把 `scripts/` 下的 13 个 `.py` 文件复制到你项目的 `.workbuddy/` 目录（⚠️ 必须放这里，脚本按自身所在目录读写 `jxjy_state.json` 等状态文件）。链式脚本 `jxjy_chain_login_study_cert.sh` 为可选，需要「登录→刷课→拉证明」一键串联时才复制
 4. 安装依赖：`playwright`、`PIL`，并执行 `playwright install chromium`
 5. 重启 WorkBuddy Desktop
 
 ### 方式三：项目级安装（团队共享）
 
 1. 把 SKILL.md 复制到项目的 `.workbuddy/skills/zj-jxjy-study/SKILL.md`
-2. 把 `scripts/` 下的 10 个 `.py` 复制到项目的 `.workbuddy/` 目录（并实现 `playwright install chromium`）
+2. 把 `scripts/` 下的 13 个 `.py` 复制到项目的 `.workbuddy/` 目录（并实现 `playwright install chromium`）
 3. ⚠️ 注意：项目级 skill 对所有项目成员可见，**不要带个人邮箱/账号配置**
 
 ---
