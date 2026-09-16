@@ -2,6 +2,9 @@
 # 分发请直接给 GitHub 仓库链接或仓库 ZIP，二者都始终是最新的源码。
 dist/
 
+# ==== 分发者手册（含转发话术，属私人沟通内容，不进公开仓库）====
+DISTRIBUTION.md
+
 # ==== 敏感配置与登录态（绝不提交）====
 jxjy_mail_config.json
 jxjy_state.json
