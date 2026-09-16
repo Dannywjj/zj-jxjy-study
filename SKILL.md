@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（学分管理 / 浙里办 SSO
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：自动登录浙里办 SSO 与正保网校、播放视频并跳过已学完课程、累计学分、刷新看板；登录态过期时通过 SMTP 邮件推送二维码远程扫码登录。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Auto-login via Zheliban SSO and Chinaacc, play videos and skip completed courses, track credits, refresh the dashboard, and trigger remote QR-code login via SMTP email when the session expires.
 category: productivity
-version: 1.7.0
+version: 1.8.0
 author: Dannywjj
 agent_created: true
 ---
@@ -44,6 +44,64 @@ agent_created: true
 > 换年度时先看这几个地方：`refresh_jxjy_after_session.py` 的选课 URL 带 `syear=`、
 > 学分面板抓的是含年度的那一行。两者都跟随上面的学习年度参数，不需要改代码。
 
+## 新人上手：三步跑完整个年度（1.8.0 起）
+
+新号、新机器、新年度，按这个顺序走即可，中间不需要改任何代码。
+
+```bash
+# ① 一次性向导：生成 jxjy_config.json（年度 / 学分目标 / 单次时长 / 是否自动清理）
+python jxjy_setup.py                 # 交互式；python jxjy_setup.py --yes 全用默认值
+
+# ② 扫码登录一次（浙里办 / 浙江政务服务网）—— 只需一次
+python jxjy_login_window.py --wait 90
+
+# ③ 一键闭环：自动刷满 → 拉证书 → 给你过目 → 清理复位
+python jxjy_full_run.py
+```
+
+**关于「为什么不让输入账号密码」**：浙江省继续教育只开放浙里办 SSO（扫码 / 短信验证码），
+没有账密接口。本 skill 全程不接触、不存储任何账号密码——这是安全边界，不是功能缺失。
+凭证存在本地 `jxjy_state.json`，**切勿拷给别人**，共用会互踢下线。
+
+### 可调项一览（`jxjy_setup.py` 生成 / 手改 `jxjy_config.json`）
+
+| 项 | 默认 | 说明 |
+|---|---|---|
+| `year` | 当前自然年 | 跨年补学填往年，例：2027 年补 2026 → 填 2026 |
+| `credit.total` / `major` / `public` | 90 / 60 / 18 | 浙江省标准；外省岗位类型不同可改 |
+| `province` | zhejiang | 目前仅适配浙江，其他省需自行改选择器与 URL |
+| `study.max_minutes_per_run` | 480 | 单次刷课上限；到点未达标会保留进度，下次接着刷 |
+| `study.login_wait_minutes` | 90 | 登录窗口最长等待 |
+| `study.cert_wait_minutes` | 180 | 拉证的轮询上限 |
+| `finish.download_cert` | true | 达标后自动下载学习证明 PDF |
+| `finish.auto_cleanup` | false | true = 无人值守直接清理；false = 每次先给你过目 |
+
+> 环境变量 `JXJY_YEAR` 优先级最高，临时补往年学分不必改配置文件。
+
+### `jxjy_full_run.py` 的闭环规则
+
+```
+登录检查 → 刷课循环(每轮 N 分钟, 最多 R 轮) → 学分达标判定
+        → 下载学习证明 → 打印结算报告 → 你确认无误 → 归档+清理 → 复位待下一年度
+```
+
+三条硬约束：
+1. **未达标绝不清理**。轮次用尽也不清，中间数据全留着，下回接着刷，不丢进度
+2. **清理只动过程数据**。日志/报告/临时 png/锁 → 归档到 `jxjy_archive/<年度>/`；
+   `jxjy_config.json`、`jxjy_state.json`、`继续教育证明/` 一律保留
+3. **默认等你过目**。只有 `--yes` 或配置 `auto_cleanup: true` 才跳过确认
+
+常用：
+
+```bash
+python jxjy_full_run.py --status        # 只看进度和是否达标，不刷课
+python jxjy_full_run.py --minutes 240   # 自定义单轮时长
+python jxjy_full_run.py --rounds 3      # 限制轮数
+python jxjy_full_run.py --no-cert       # 跳过拉证
+python jxjy_full_run.py --yes           # 无人值守：结算后直接清理
+python jxjy_full_run.py --cleanup-only  # 只做归档清理（未达标会被拒绝）
+```
+
 ## 触发场景
 
 用户使用以下任一表述时，优先使用本技能：
@@ -58,6 +116,14 @@ agent_created: true
 > 跨天/长会话还需另挂 `jxjy_login_guard.py` 保证中途掉线能自动接力。
 
 ## 关键文件（当前项目 .workbuddy/ 下）
+
+一键闭环（1.8.0 新增，优先用这套）：
+- `jxjy_setup.py` —— 首次使用向导，生成 `jxjy_config.json`（`--yes` 全默认、`--show` 只看不改）
+- `jxjy_full_run.py` —— 一键闭环：登录 → 刷满 → 拉证 → 结算 → 确认清理 → 复位
+- `jxjy_conf.py` —— 统一配置读取层（`jxjy_config.json` > 环境变量 > 内置默认）
+- `jxjy_config.json` —— 使用者自己的配置（**不可共享**，已 gitignore）
+- `jxjy_final_report.json` —— 年度结算报告
+- `jxjy_archive/<年度>/` —— 清理时归档的过程数据
 
 刷课与登录：
 - `jxjy_daily_study.py` —— 每日刷课主脚本（仅参数：时长分钟数；**无自动关机**）

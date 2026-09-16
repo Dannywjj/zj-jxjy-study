@@ -69,18 +69,28 @@
 
 AI 会自动从 BuiltinMarket 搜索、安装到 `~/.workbuddy/skills/zj-jxjy-study/`。
 
-### 第 2 步：配置邮箱 + 登录态
-
-1. 在你的项目 `.workbuddy/jxjy_mail_config.json` 填入 SMTP 配置（参考 [配置说明](#配置说明)）
-2. 启动 `jxjy_remote_login.py --wait 15`，扫描邮件里的二维码完成首次登录
-
-### 第 3 步：开刷
+### 第 2 步：跑一次向导 + 扫码登录
 
 ```
-继续教育开始
+python jxjy_setup.py              # 问你年度 / 学分目标 / 单次时长，生成 jxjy_config.json
+python jxjy_login_window.py --wait 90   # 弹窗口，浙里办扫码或短信登录，只需一次
 ```
 
-AI 会启动脚本，每天 9:00 自动运行 15 小时。
+> **不需要输入任何账号密码。** 浙江省继续教育只开放浙里办 SSO（扫码 / 短信验证码），
+> 没有账密接口。本工具全程不接触、不存储账密，只在本机保存登录凭证 `jxjy_state.json`。
+> 邮箱 SMTP 是**可选**的 —— 只有想让它在你不在电脑旁时邮件推送登录二维码才需要配（见[配置说明](#配置说明)）。
+
+### 第 3 步：一键跑到拿证
+
+```
+python jxjy_full_run.py
+```
+
+它会自动：刷满 90 学分 → 下载学习证明 PDF → 打印结算报告 → 等你过目 → 归档清理 → 复位待下一年。
+
+```
+python jxjy_full_run.py --status   # 只想看进度时用这个，不刷课
+```
 
 ---
 
@@ -161,11 +171,25 @@ python jxjy_login_window.py --wait 10
 
 ## 换账号 / 换年度要改什么
 
-脚本本身不含任何个人信息（无姓名、手机号、邮箱、目录名），换到新的号上跑只需各人自己准备登录态和邮箱配置。
+脚本本身不含任何个人信息（无姓名、手机号、邮箱、目录名），换到新的号上跑只需各人自己准备登录态。
+**v1.8.0 起这些都不用改代码了** —— 跑一次 `jxjy_setup.py`，或者直接在 `.workbuddy/jxjy_config.json` 里填：
+
+```json
+{
+  "year": 2026,
+  "province": "zhejiang",
+  "credit": { "total": 90.0, "major": 60.0, "public": 18.0 },
+  "study": { "max_minutes_per_run": 480, "login_wait_minutes": 90, "cert_wait_minutes": 180 },
+  "finish": { "download_cert": true, "auto_cleanup": false }
+}
+```
 
 | 参数 | 默认值 | 什么时候要改 |
 |---|---|---|
-| 学习年度 | 当前自然年 | 跨年补学（如 2027 年还在补 2026 年度）→ 设环境变量 `JXJY_YEAR=2026` |
+| `year` | 当前自然年 | 跨年补学（如 2027 年还在补 2026 年度）→ 填 `2026`；临时改可用环境变量 `JXJY_YEAR`（优先级最高） |
+| `credit.*` | 90 / 60 / 18 | 浙江省标准；岗位类型要求不同时改这里 |
+| `study.max_minutes_per_run` | 480 | 单次连刷上限；到点未达标会保留进度，下次接着刷 |
+| `finish.auto_cleanup` | false | 改 true = 结算后无人值守直接清理；false = 每次先给你过目 |
 | 正保学习计划 ID | 自动从学习中心页面识别 | 拉证报「未找到打印信息」时手动指定：`jxjy_download_cert.py 200 --study-id <ID>` |
 
 学习计划 ID 的取值优先级：`--study-id` > 环境变量 `JXJY_STUDY_ID` > 页面动态识别 > 内置兜底值。

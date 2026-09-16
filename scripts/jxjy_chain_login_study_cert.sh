@@ -9,7 +9,21 @@
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR" || exit 1
-PY="C:/Users/admin/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
+# Python 解释器：优先 JXJY_PYTHON，否则自动探测 PATH 里的 python/python3/py
+# （旧版把本机 venv 绝对路径写死在这里是移植性 bug，给别人用必炸，已改为动态探测）
+if [ -n "${JXJY_PYTHON:-}" ]; then
+  PY="$JXJY_PYTHON"
+elif command -v python >/dev/null 2>&1; then
+  PY="$(command -v python)"
+elif command -v python3 >/dev/null 2>&1; then
+  PY="$(command -v python3)"
+elif command -v py >/dev/null 2>&1; then
+  PY="py"
+else
+  echo "找不到 Python。请安装后重试，或执行：export JXJY_PYTHON=/path/to/python.exe"
+  exit 1
+fi
+echo "使用解释器: $PY"
 WAIT_MIN="${1:-90}"
 STUDY_MIN="${2:-240}"
 CERT_MIN="${3:-180}"

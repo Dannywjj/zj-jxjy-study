@@ -6,6 +6,7 @@ dist/
 DISTRIBUTION.md
 
 # ==== 敏感配置与登录态（绝不提交）====
+jxjy_config.json
 jxjy_mail_config.json
 jxjy_state.json
 *.bak

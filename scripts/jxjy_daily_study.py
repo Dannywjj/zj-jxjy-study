@@ -44,6 +44,18 @@ CREDIT_REQUIREMENT = {"total": 90.0, "major": 60.0, "public": 18.0}
 # 跨年补学场景（例如 2027 年仍在补 2026 年度学分）用环境变量覆盖：set JXJY_YEAR=2026
 STUDY_YEAR = int(os.environ.get("JXJY_YEAR") or datetime.datetime.now().year)
 
+# 统一配置层（1.8.0+）：存在 jxjy_conf.py + jxjy_config.json 时以配置为准
+try:
+    import jxjy_conf as __conf
+    STUDY_YEAR = int(__conf.year())
+    CREDIT_REQUIREMENT = {
+        "total": __conf.credit_total(),
+        "major": __conf.credit_major(),
+        "public": __conf.credit_public(),
+    }
+except Exception:
+    pass
+
 
 def log(msg):
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

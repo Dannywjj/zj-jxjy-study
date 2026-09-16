@@ -21,6 +21,13 @@ DATA = os.path.join(BASE, "jxjy_dashboard_data.json")
 # 学习年度：默认取当前自然年；跨年补学场景可用 JXJY_YEAR 环境变量覆盖
 STUDY_YEAR = int(os.environ.get("JXJY_YEAR") or datetime.datetime.now().year)
 
+# 统一配置层（1.8.0+）：存在 jxjy_conf.py + jxjy_config.json 时以配置为准
+try:
+    import jxjy_conf as __conf
+    STUDY_YEAR = int(__conf.year())
+except Exception:
+    pass
+
 LEARN_URL = "https://jxjy.czt.zj.gov.cn/front/golearncenterNew.html"
 SELECT_URL = f"https://jxjy.czt.zj.gov.cn/front/goSelectSchoolNew.html?syear={STUDY_YEAR}"
 SCHOOL = "https://jxjy.chinaacc.com/learningCenter"

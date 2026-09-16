@@ -17,6 +17,13 @@ KANBAN = os.path.join(BASE, "继续教育看板.html")
 # 学习年度：默认取当前自然年；跨年补学场景可用 JXJY_YEAR 环境变量覆盖
 STUDY_YEAR = int(os.environ.get("JXJY_YEAR") or datetime.datetime.now().year)
 
+# 统一配置层（1.8.0+）：存在 jxjy_conf.py + jxjy_config.json 时以配置为准
+try:
+    import jxjy_conf as __conf
+    STUDY_YEAR = int(__conf.year())
+except Exception:
+    pass
+
 
 def load(path):
     with open(path, "r", encoding="utf-8") as f:
