@@ -61,13 +61,15 @@
 
 ### 第 1 步：安装 Skill
 
-在 WorkBuddy Desktop 对话框里说一句：
+作者已将推荐市场的旧版下架并准备重新上架，**目前请走手动安装**（市场恢复后会回来声称"装个 zj-jxjy-study"即可）：
 
-```
-装个 zj-jxjy-study
+```bash
+git clone https://github.com/Dannywjj/zj-jxjy-study.git
+cp zj-jxjy-study/SKILL.md ~/.workbuddy/skills/zj-jxjy-study/SKILL.md
+cp zj-jxjy-study/scripts/*.py <你的项目>/.workbuddy/
 ```
 
-AI 会自动从 BuiltinMarket 搜索、安装到 `~/.workbuddy/skills/zj-jxjy-study/`。
+完整步骤见 [详细安装步骤](#详细安装步骤)。
 
 ### 第 2 步：跑一次向导 + 扫码登录
 
@@ -100,7 +102,7 @@ python jxjy_full_run.py --status   # 只想看进度时用这个，不刷课
 
 | 安装方式 | 更新机制 | 操作 |
 |---|---|---|
-| WorkBuddy 市场安装 | 有。系统会对已安装 skill 检测新版本（返回值里的 `updateAvailable`） | 有更新时重装一次即可；**但目前市场停在 1.2.0，不会自动追平本仓库** |
+| WorkBuddy 市场安装 | 有。系统会对已安装 skill 检测新版本（返回值里的 `updateAvailable`），有更新时重装一次即可。⚠️ 重新上架后**会是新的 skillId**，旧条目装的人收不到它 |
 | 手动安装（GitHub / zip） | 无自动更新，本机不会知道上游改了什么 | 重新拉取覆盖，见下方 |
 
 手动安装升级到最新版：
@@ -135,18 +137,15 @@ cp /tmp/zj-jxjy-study/SKILL.md ~/.workbuddy/skills/zj-jxjy-study/SKILL.md
 
 ## 详细安装步骤
 
-### 方式一：WorkBuddy 市场安装
+### 方式一：WorkBuddy 市场安装（暂不可用）
 
 ```
 装个 zj-jxjy-study
 ```
 
-按提示确认安装即可。安装位置：`C:\Users\<你的用户名>\.workbuddy\skills\zj-jxjy-study\`
-
-> ⚠️ **市场版本落后于本仓库**。截至 2026-09-16，推荐市场上的仍是 **1.2.0**，
-> 缺长跑守护、拉证脚本、1.6.3 卡末尾兜底、换账号支持与 1.8.0 的一键闭环。
-> 装完之后请在 skills 目录对照 `SKILL.md` 顶部的 `version` 字段确认；
-> 想要最新版请用下方「方式二」从 GitHub 取。
+> ⚠️ **截至 2026-09-17，推荐市场上的该 skill 已由作者下架**（旧版长期停留在 1.2.0，缺卡末尾兜底等修复）。
+> 作者整理完毕后会重新上架；在那之前这句话搜不到结果，**请用方式二**。
+> 重新上架后你可以卸掉手动安装的版本、改从市场安装，这样后续能收到更新提示。
 
 ### 方式二：手动安装（推荐，版本最新）
 
