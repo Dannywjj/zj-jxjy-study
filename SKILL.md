@@ -6,7 +6,7 @@ description: 浙江会计继续教育自动刷课（90 学分 / 浙里办 SSO / 
 description_zh: 面向浙江会计从业者的继续教育自动刷课技能：向导配置年度与学分目标 → 扫码登录 → 一键刷满 90 学分 → 下载官方学习证明 PDF → 结算过目后归档清理并复位。含长跑守护与卡末尾死锁兜底；登录态过期时通过 SMTP 邮件推送二维码远程补登。全程不接触账号密码。
 description_en: Auto-study skill for Zhejiang accounting continuing professional education (CPE). Set year and credit targets via a wizard, scan a QR code once, then one command drives it all the way to 90 credits, downloads the official completion certificate PDF, and archives itself for next year after you review the settlement report. No username or password is ever handled — the platform only exposes Zheliban SSO QR login.
 category: productivity
-version: 1.8.0
+version: 1.8.1
 author: Dannywjj
 license: MIT
 agent_created: true
